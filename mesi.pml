@@ -51,6 +51,7 @@ cache_state_t cpu_states[CPU_COUNT];
 
 
 inline signal_all(msgtype, address) {
+    printf("%d: Signalling all {%e,%d}\n", _pid, msgtype, address);
     int _i;
     for(_i : 0 .. CPU_COUNT) {
         if
@@ -66,6 +67,7 @@ inline flush(address) {
 }
 
 inline flush_and_invalidate(address) {
+    printf("%d: Flushing and invalidating at %d\n", _pid, address);
     flush(address);
     CACHE_STATE(_pid, address) = Invalid;
 }
@@ -93,6 +95,7 @@ inline signal_write_mem(address) {
 inline respond() {
     int address = 0;
 
+    printf("%d: Starting responding to all...\n", _pid);
     int cpu_idx;
     for (cpu_idx : 0 .. CPU_COUNT - 1) {
         if
@@ -102,6 +105,8 @@ inline respond() {
             /**************  BusRd  ****************/
             :: req_channel[cpu_idx] ? BusRd, address -> {
                 mtype:cache_state my_old_cache_state = CACHE_STATE(_pid, address);
+                printf("%d: Got msg={BusRd,%d} from %d, my_old_cache_state=%e\n",
+                    _pid, address, cpu_idx, my_old_cache_state);
                 if
                 :: my_old_cache_state == Modified -> {
                     // [1.2] M|BusRd
@@ -116,10 +121,13 @@ inline respond() {
                 fi
 
                 mtype:cache_state my_new_cache_state = CACHE_STATE(_pid, address);
+                printf("%d: Sending msg={%e,%d} to %d",
+                    _pid, my_new_cache_state, address, cpu_idx);
                 resp_channel[cpu_idx] ! my_new_cache_state, address;
             }
             /**************  BusUpgr  ****************/
             :: req_channel[cpu_idx] ? BusUpgr, address -> {
+                printf("%d: Got msg={BusUpgr,%d} from %d\n", _pid, address, cpu_idx);
                 // TODO: There is no need to respond to this -> finaly our state will
                 // be invalid.
                 mtype:cache_state my_state = CACHE_STATE(_pid, address);
@@ -128,6 +136,7 @@ inline respond() {
             }
             /**************  BusRdX  ****************/
             :: req_channel[cpu_idx] ? BusRdX, address -> {
+                printf("%d: Got msg={BusRdX,%d} from %d\n", _pid, address, cpu_idx)
                 // TODO: There is no need to respond to this -> finaly our state will
                 // be invalid
                 mtype:cache_state state = CACHE_STATE(_pid, address);
@@ -151,6 +160,7 @@ inline respond() {
         }
         fi
     }
+    printf("%d: Done responding to all.\n", _pid);
 }
 
 inline read(address) {
