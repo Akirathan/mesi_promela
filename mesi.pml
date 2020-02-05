@@ -179,6 +179,7 @@ inline read(address) {
         assert next_state == Exclusive || next_state == Shared;
         change_state(address, next_state);
         CACHE_CONTENT(_pid, address) = memory[address];
+    }
     :: curr_state == Exclusive || curr_state == Shared || curr_state == Modified -> {
         // [1.1] E|PrRd
         // Reading block in address should be a cache hit.
