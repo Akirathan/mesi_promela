@@ -51,12 +51,12 @@ cache_state_t cpu_states[CPU_COUNT];
 
 
 inline signal_all(msgtype, address) {
-    int i;
-    for(i : 0 .. CPU_COUNT) {
+    int _i;
+    for(_i : 0 .. CPU_COUNT) {
         if
         // Do not signal self
-        :: i == _pid -> skip;
-        :: else -> req_channel[i] ! msgtype, address;
+        :: _i == _pid -> skip;
+        :: else -> req_channel[_i] ! msgtype, address;
         fi
     }
 }
@@ -93,6 +93,7 @@ inline signal_write_mem(address) {
 inline respond() {
     int address = 0;
 
+    int cpu_idx;
     for (cpu_idx : 0 .. CPU_COUNT - 1) {
         if
         :: cpu_idx == _pid -> skip;
@@ -100,7 +101,7 @@ inline respond() {
             if
             /**************  BusRd  ****************/
             :: req_channel[cpu_idx] ? BusRd, address -> {
-                mtype:cache_state_t my_old_cache_state = CACHE_STATE(_pid, address);
+                mtype:cache_state my_old_cache_state = CACHE_STATE(_pid, address);
                 if
                 :: my_old_cache_state == Modified -> {
                     // [1.2] M|BusRd
@@ -114,22 +115,22 @@ inline respond() {
                 :: my_old_cache_state == Invalid -> skip;
                 fi
 
-                mtype:cache_state_t my_new_cache_state = CACHE_STATE(_pid, address);
+                mtype:cache_state my_new_cache_state = CACHE_STATE(_pid, address);
                 resp_channel[cpu_idx] ! my_new_cache_state, address;
             }
             /**************  BusUpgr  ****************/
             :: req_channel[cpu_idx] ? BusUpgr, address -> {
                 // TODO: There is no need to respond to this -> finaly our state will
                 // be invalid.
-                mtype:cache_state_t my_state = CACHE_STATE(_pid, address);
+                mtype:cache_state my_state = CACHE_STATE(_pid, address);
                 assert my_state == Invalid || my_state == Shared;
                 change_state(address, Invalid);
             }
             /**************  BusRdX  ****************/
-            :: req_channel[cpu_idx] ? BusRdx, address -> {
+            :: req_channel[cpu_idx] ? BusRdX, address -> {
                 // TODO: There is no need to respond to this -> finaly our state will
                 // be invalid
-                mtype:cache_state_t state = CACHE_STATE(_pid, address);
+                mtype:cache_state state = CACHE_STATE(_pid, address);
                 if
                 :: state == Invalid -> skip;
                 :: state == Exclusive -> {
@@ -162,6 +163,7 @@ inline read(address) {
         signal_all(BusRd, address);
         // Receive states from other CPUs.
         mtype:cache_state next_state = Exclusive;
+        int cpu_idx;
         for (cpu_idx : 0 .. CPU_COUNT - 1) {
             if
             :: cpu_idx == _pid -> skip;
@@ -197,7 +199,7 @@ inline write(address, value) {
     if
     :: curr_state == Invalid -> {
         // [1.1] I|PrWr
-        signal_all(BusRdx, address);
+        signal_all(BusRdX, address);
         change_state(address, Modified);
         CACHE_CONTENT(_pid, address) = value;
     }
@@ -239,6 +241,7 @@ inline init_caches() {
 * Writes and reads from random places at memory, and thus simulating some program.
 */ 
 proctype cpu() {
+    int i;
     for (i : 0 .. STEP_NUM) {
         // Tohle by melo byt v ifu
         respond();
@@ -253,7 +256,6 @@ proctype cpu() {
             write(address, value);
         }
         fi
-        read_or_write(address);
     }
 }
 
@@ -262,7 +264,7 @@ init {
     init_caches();
 
     int cpu_idx;
-    for (cpu_idx : 0 .. CPU_COUNT) {
+    for (cpu_idx : 0 .. CPU_COUNT - 1) {
         run cpu();
     }
 }
