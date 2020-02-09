@@ -28,8 +28,8 @@
 mtype:cache_state = {Modified, Exclusive, Shared, Invalid};
 mtype:signal = {BusRd, BusRdX, BusUpgr};
 
-chan req_channel[CPU_COUNT] = [0] of {mtype, int};
-chan resp_channel[CPU_COUNT] = [0] of {mtype, int}
+chan req_channel[CPU_COUNT] = [1] of {mtype, int};
+chan resp_channel[CPU_COUNT] = [1] of {mtype, int}
 
 typedef cache_state_t {
     mtype:cache_state cache_states[CACHE_SIZE];
@@ -90,7 +90,8 @@ inline signal_write_mem(address) {
 }
 
 /**
- * Respond to all requests of all other CPUs.
+ * Respond to all requests of all other CPUs. More specifically, polls request channel
+ * and if there are some requests, respond to them.
  */
 inline respond(mypid) {
     int address = 0;
@@ -103,7 +104,8 @@ inline respond(mypid) {
         :: else -> {
             if
             /**************  BusRd  ****************/
-            :: req_channel[cpu_idx] ? BusRd, address -> {
+            :: req_channel[cpu_idx] ? [BusRd, address] -> {
+                req_channel[cpu_idx] ? BusRd, address;
                 mtype:cache_state my_old_cache_state = CACHE_STATE(mypid, address);
                 printf("%d: Got msg={BusRd,%d} from %d, my_old_cache_state=%e\n",
                     mypid, address, cpu_idx, my_old_cache_state);
@@ -126,7 +128,8 @@ inline respond(mypid) {
                 resp_channel[cpu_idx] ! my_new_cache_state, address;
             }
             /**************  BusUpgr  ****************/
-            :: req_channel[cpu_idx] ? BusUpgr, address -> {
+            :: req_channel[cpu_idx] ? [BusUpgr, address] -> {
+                req_channel[cpu_idx] ? BusUpgr, address;
                 printf("%d: Got msg={BusUpgr,%d} from %d\n", mypid, address, cpu_idx);
                 // TODO: There is no need to respond to this -> finaly our state will
                 // be invalid.
@@ -135,7 +138,8 @@ inline respond(mypid) {
                 change_state(mypid, address, Invalid);
             }
             /**************  BusRdX  ****************/
-            :: req_channel[cpu_idx] ? BusRdX, address -> {
+            :: req_channel[cpu_idx] ? [BusRdX, address] -> {
+                req_channel[cpu_idx] ? BusRdX, address;
                 printf("%d: Got msg={BusRdX,%d} from %d\n", mypid, address, cpu_idx)
                 // TODO: There is no need to respond to this -> finaly our state will
                 // be invalid
@@ -156,6 +160,7 @@ inline respond(mypid) {
                 }
                 fi
             }
+            :: else -> skip;
             fi
         }
         fi
