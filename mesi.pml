@@ -55,7 +55,7 @@ cache_state_t cpu_states[CPU_COUNT];
 inline signal_all(mypid, msgtype, address) {
     printf("%d: Signalling all {%e,%d}\n", mypid, msgtype, address);
     int _i;
-    for(_i : 0 .. CPU_COUNT) {
+    for(_i : 0 .. CPU_COUNT - 1) {
         if
         // Do not signal self
         :: _i == mypid -> skip;
