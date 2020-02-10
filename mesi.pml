@@ -49,11 +49,14 @@ bit memory[MEMORY_SIZE] = 0;
 cache_t caches[CPU_COUNT];
 cache_state_t cpu_states[CPU_COUNT];
 
-#define CACHE_STATE(cpu_idx, cache_addr) \
-    cpu_states[cpu_idx].cache_states[cache_addr]
+#define CACHE_ADDR(mem_addr) \
+    mem_addr % CACHE_SIZE
 
-#define CACHE_CONTENT(cpu_idx, cache_addr) \
-    caches[cpu_idx].content[cache_addr]
+#define CACHE_STATE(cpu_idx, memaddr) \
+    cpu_states[cpu_idx].cache_states[CACHE_ADDR(memaddr)]
+
+#define CACHE_CONTENT(cpu_idx, memaddr) \
+    caches[cpu_idx].content[CACHE_ADDR(memaddr)]
 
 
 /**
@@ -62,39 +65,39 @@ cache_state_t cpu_states[CPU_COUNT];
  */
 inline signal_all(mypid, msgtype, mem_addr) {
     atomic {
-    printf("%d: Signalling all {%e,%d}\n", mypid, msgtype, mem_addr);
-    int _i;
-    for(_i : 0 .. CPU_COUNT - 1) {
-        if
-        // Do not signal self
-        :: _i == mypid -> skip;
+        printf("%d: Signalling all {%e,%d}\n", mypid, msgtype, mem_addr);
+        int _i;
+        for(_i : 0 .. CPU_COUNT - 1) {
+            if
+                // Do not signal self
+                :: _i == mypid -> skip;
                 :: else -> {
                     printf("%d: Sending req_channel[%d] ! %e, %d, %d\n", mypid, _i, msgtype, mem_addr, mypid);
                     req_channel[_i] ! msgtype, mem_addr, mypid;
                 }
-        fi
+            fi
+        }
     }
-}
 }
 
 inline flush_and_invalidate(mypid, memaddr) {
     // TODO: Enclose in atomic?
-    printf("%d: memory[%d] = %d\n", mypid, memaddr, CACHE_CONTENT(mypid, cache_addr));
-    memory[memaddr] = CACHE_CONTENT(mypid, cache_addr);
+    printf("%d: memory[%d] = %d\n", mypid, memaddr, CACHE_CONTENT(mypid, memaddr));
+    memory[memaddr] = CACHE_CONTENT(mypid, memaddr);
     change_state(mypid, memaddr, Invalid);
 }
 
 inline change_state(mypid, mem_addr, new_state) {
-    mtype old_state = CACHE_STATE(mypid, cache_addr);
+    mtype old_state = CACHE_STATE(mypid, mem_addr);
     printf("%d: State %e --> %e, mem_addr=%d, cache_addr=%d\n",
-        mypid, old_state, new_state, mem_addr, cache_addr);
+        mypid, old_state, new_state, mem_addr, CACHE_ADDR(mem_addr));
 
     assert (old_state == Modified && (new_state == Shared || new_state == Invalid)) ||
            (old_state == Exclusive && (new_state == Modified || new_state == Shared || new_state == Invalid)) ||
            (old_state == Shared && (new_state == Modified || new_state == Invalid)) ||
            (old_state == Invalid && (new_state == Modified || new_state == Exclusive || new_state == Shared))
 
-    CACHE_STATE(mypid, cache_addr) = new_state;
+    CACHE_STATE(mypid, mem_addr) = new_state;
 }
 
 /**
@@ -106,80 +109,76 @@ inline respond(mypid) {
     byte sender_pid;
 
     printf("%d: Starting responding to all...\n", mypid);
-        if
-            /**************  BusRd  ****************/
+    if
+        /**************  BusRd  ****************/
         :: req_channel[mypid] ? [BusRd, recved_mem_addr, sender_pid] -> {
             req_channel[mypid] ? BusRd, recved_mem_addr, sender_pid;
-        byte _cache_addr = recved_mem_addr % CACHE_SIZE;
-        mtype my_old_cache_state = CACHE_STATE(mypid, _cache_addr);
-                printf("%d: Got msg={BusRd,%d} from %d, my_old_cache_state=%e\n",
-            mypid, recved_mem_addr, mypid, my_old_cache_state);
-                if
+            mtype my_old_cache_state = CACHE_STATE(mypid, recved_mem_addr);
+            printf("%d: Got msg={BusRd,%d} from %d, my_old_cache_state=%e\n",
+                mypid, recved_mem_addr, mypid, my_old_cache_state);
+            if
                 :: my_old_cache_state == Modified -> {
                     // [1.2] M|BusRd
-            flush_and_invalidate(mypid, recved_mem_addr);
+                    flush_and_invalidate(mypid, recved_mem_addr);
                 }
                 :: my_old_cache_state == Exclusive -> {
                     // [1.2] E|BusRd
-            change_state(mypid, recved_mem_addr, Shared);
+                    change_state(mypid, recved_mem_addr, Shared);
                 }
                 :: my_old_cache_state == Shared -> skip;
                 :: my_old_cache_state == Invalid -> skip;
-                fi
+            fi
 
-        mtype my_new_cache_state = CACHE_STATE(mypid, _cache_addr);
+            mtype my_new_cache_state = CACHE_STATE(mypid, recved_mem_addr);
             printf("%d: Sending msg={%e,%d} to %d\n", mypid, my_new_cache_state, recved_mem_addr, sender_pid);
             resp_channel[sender_pid] ! my_new_cache_state, recved_mem_addr;
-            }
+        }
 
-            /**************  BusUpgr  ****************/
+        /**************  BusUpgr  ****************/
         :: req_channel[mypid] ? [BusUpgr, recved_mem_addr, sender_pid] -> {
             req_channel[mypid] ? BusUpgr, recved_mem_addr, sender_pid;
-        byte _cache_addr = recved_mem_addr % CACHE_SIZE;
             printf("%d: Got msg={BusUpgr,%d} from %d\n", mypid, recved_mem_addr, sender_pid);
-                // TODO: There is no need to respond to this -> finaly our state will
-                // be invalid.
-        mtype my_state = CACHE_STATE(mypid, _cache_addr);
-                assert my_state == Invalid || my_state == Shared;
-        change_state(mypid, recved_mem_addr, Invalid);
-            }
+            // TODO: There is no need to respond to this -> finaly our state will
+            // be invalid.
+            mtype my_state = CACHE_STATE(mypid, recved_mem_addr);
+            assert my_state == Invalid || my_state == Shared;
+            change_state(mypid, recved_mem_addr, Invalid);
+        }
 
-            /**************  BusRdX  ****************/
+        /**************  BusRdX  ****************/
         :: req_channel[mypid] ? [BusRdX, recved_mem_addr, sender_pid] -> {
             req_channel[mypid] ? BusRdX, recved_mem_addr, sender_pid;
-        byte _cache_addr = recved_mem_addr % CACHE_SIZE;
             printf("%d: Got msg={BusRdX,%d} from %d\n", mypid, recved_mem_addr, sender_pid)
-                // TODO: There is no need to respond to this -> finaly our state will
-                // be invalid
-        mtype state = CACHE_STATE(mypid, _cache_addr);
-                if
+            // TODO: There is no need to respond to this -> finaly our state will
+            // be invalid
+            mtype state = CACHE_STATE(mypid, recved_mem_addr);
+            if
                 :: state == Invalid -> skip;
                 :: state == Exclusive -> {
                     // [1.2] E|BusRdX
-            flush_and_invalidate(mypid, recved_mem_addr);
+                    flush_and_invalidate(mypid, recved_mem_addr);
                 }
                 :: state == Shared -> {
                     // [1.2] S|BusRdX
-            change_state(mypid, recved_mem_addr, Invalid);
+                    change_state(mypid, recved_mem_addr, Invalid);
                 }
                 :: state == Modified -> {
                     // [1.2] M|BusRdX
-            flush_and_invalidate(mypid, recved_mem_addr);
+                    flush_and_invalidate(mypid, recved_mem_addr);
                 }
-                fi
-            }
+            fi
+        }
 
         // We do not want to block here if there are no requests for current CPU.
-            :: else -> skip;
-            fi
+        :: else -> skip;
+    fi
     printf("%d: Done responding to all.\n", mypid);
 }
 
 inline read(mypid, mem_addr) {
     printf("%d: Reading mem_addr %d\n", mypid, mem_addr);
-    byte cache_addr = mem_addr % CACHE_SIZE;
 
-    mtype curr_state = CACHE_STATE(mypid, cache_addr);
+    mtype curr_state = CACHE_STATE(mypid, mem_addr);
     if
     :: curr_state == Invalid -> {
         // [1.1] I|PrRd
@@ -206,13 +205,13 @@ inline read(mypid, mem_addr) {
         }
         assert next_state == Exclusive || next_state == Shared;
         change_state(mypid, mem_addr, next_state);
-        CACHE_CONTENT(mypid, cache_addr) = memory[mem_addr];
+        CACHE_CONTENT(mypid, mem_addr) = memory[mem_addr];
     }
     :: curr_state == Exclusive || curr_state == Shared || curr_state == Modified -> {
         // [1.1] E|PrRd
         // Reading block in mem_addr should be a cache hit.
         // TODO: Does this assert make sense?
-        assert CACHE_CONTENT(mypid, cache_addr) == memory[mem_addr];
+        assert CACHE_CONTENT(mypid, mem_addr) == memory[mem_addr];
     }
     :: else -> ASSERT_NOT_REACHABLE;
     fi
@@ -220,20 +219,19 @@ inline read(mypid, mem_addr) {
 
 inline write(mypid, mem_address, value) {
     printf("%d: Writing %d to mem_address %d\n", mypid, value, mem_address);
-    byte cache_addr = mem_address % CACHE_SIZE;
 
-    mtype curr_state = CACHE_STATE(mypid, cache_addr);
+    mtype curr_state = CACHE_STATE(mypid, mem_address);
     if
     :: curr_state == Invalid -> {
         // [1.1] I|PrWr
         signal_all(mypid, BusRdX, mem_address);
         change_state(mypid, mem_address, Modified);
-        CACHE_CONTENT(mypid, cache_addr) = value;
+        CACHE_CONTENT(mypid, mem_address) = value;
     }
     :: curr_state == Exclusive -> {
         // [1.1] E|PrWr
         change_state(mypid, mem_address, Modified);
-        CACHE_CONTENT(mypid, cache_addr) = value;
+        CACHE_CONTENT(mypid, mem_address) = value;
     }
     :: curr_state == Shared -> {
         // [1.1] S|PrWr
@@ -271,7 +269,7 @@ inline init_cachestates() {
     for (cpu_idx : 0 .. CPU_COUNT - 1) {
         int cache_addr;
         for (cache_addr : 0 .. CACHE_SIZE - 1) {
-            CACHE_STATE(cpu_idx, cache_addr) = Invalid;
+            cpu_states[cpu_idx].cache_states[cache_addr] = Invalid;
         }
     }
 }
@@ -282,7 +280,7 @@ inline init_caches() {
         int cache_addr;
         for (cache_addr : 0 .. CACHE_SIZE - 1) {
             // TODO: This produces error (warning?) - add SET_CACHE_CONTENT macro.
-            CACHE_CONTENT(cpu_idx, cache_addr) = 0;
+            caches[cpu_idx].content[cache_addr] = 0;
         }
     }
 }
