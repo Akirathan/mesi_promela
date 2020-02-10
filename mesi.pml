@@ -247,7 +247,7 @@ inline write(mypid, mem_address, value) {
 */ 
 proctype cpu(int mypid) {
     int i;
-    for (i : 0 .. STEP_NUM) {
+    for (i : 0 .. STEP_NUM - 1) {
         // Tohle by melo byt v ifu
         respond(mypid);
         // ...
@@ -262,6 +262,8 @@ proctype cpu(int mypid) {
         }
         fi
     }
+    // Respond at the end of all the operations - there may be some requests pending.
+    respond(mypid);
 }
 
 inline init_cachestates() {
