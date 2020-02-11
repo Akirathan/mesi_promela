@@ -59,6 +59,11 @@ cache_state_t cpu_states[CPU_COUNT];
     caches[cpu_idx].content[CACHE_ADDR(memaddr)]
 
 
+inline print_state(mypid) {
+    printf("%d: ")
+}
+
+
 /**
  * Send a request to all CPUs except self. More precisely, send a request_t to every
  * req_channel[i] for every i such that i != self_cpu_idx.
