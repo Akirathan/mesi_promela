@@ -59,6 +59,30 @@ cache_state_t cpu_states[CPU_COUNT];
     caches[cpu_idx].content[CACHE_ADDR(memaddr)]
 
 
+inline print_state(mypid) {
+    atomic {
+        printf("%d: CACHE = [\n", mypid)
+        int j;
+        for (j : 0 .. CACHE_SIZE - 1) {
+            printf("  %d (%e),\n", caches[mypid].content[j],
+                   cpu_states[mypid].cache_states[j]);
+        }
+        printf("]\n");
+    }
+}
+
+inline print_memory() {
+    atomic {
+        printf("MEMORY = [\n");
+        int j;
+        for (j : 0 .. MEMORY_SIZE - 1) {
+            printf("  %d,\n", memory[j]);
+        }
+        printf("]\n");
+    }
+}
+
+
 /**
  * Send a request to all CPUs except self. More precisely, send a request_t to every
  * req_channel[i] for every i such that i != self_cpu_idx.
@@ -261,6 +285,8 @@ proctype cpu(int mypid) {
             write(mypid, mem_addr, value);
         }
         fi
+        print_state(mypid);
+        print_memory();
     }
     // Respond at the end of all the operations - there may be some requests pending.
     respond(mypid);
