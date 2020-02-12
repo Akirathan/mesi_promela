@@ -91,6 +91,49 @@ inline print_memory() {
     }
 }
 
+inline check_for_two_modified_cachelines() {
+    int cpu_idx;
+    for (cpu_idx : 0 .. CPU_COUNT - 1) {
+        int cache_addr;
+        for (cache_addr : 0 .. CACHE_SIZE - 1) {
+            if
+                :: CACHE_STATE(cpu_idx, cache_addr) == Modified -> {
+                    // Check if other cpu has modified state
+                    int tag = CACHE_TAG(cpu_idx, cache_addr);
+                    assert tag != -1;
+                    // TODO: Make more efficient.
+                    atomic {
+                        // We should not find any other cpu that has a Modified cache line
+                        // with same tag.
+                        int other_cpu_idx;
+                        for (other_cpu_idx : (cpu_idx + 1) .. (CPU_COUNT - 1)) {
+                            int other_cache_addr;
+                            for (other_cache_addr : 0 .. CACHE_SIZE - 1) {
+                                if
+                                    :: CACHE_STATE(other_cpu_idx, other_cache_addr) == Modified &&
+                                    CACHE_TAG(other_cpu_idx, other_cache_addr) == tag -> 
+two_modified:                       {
+                                        printf("Monitor: At two_modified, printing state:\n");
+                                        print_state(cpu_idx);
+                                        print_state(other_cpu_idx);
+                                        print_memory();
+                                    }
+                                    :: else -> skip;
+                                fi
+                            }
+                        }
+                    }
+                }
+                :: else -> skip;
+            fi
+        }
+    }
+}
+
+active proctype monitor() {
+    // TODO: Monitor untill all CPUs finished
+}
+
 
 /**
  * Send a request to all CPUs except self. More precisely, send a request_t to every
