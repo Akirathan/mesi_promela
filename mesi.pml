@@ -176,7 +176,7 @@ inline respond(mypid) {
                 :: state == Invalid -> skip;
                 :: state == Exclusive -> {
                     // [1.2] E|BusRdX
-                    flush_and_invalidate(mypid, recved_mem_addr);
+                    change_state(mypid, recved_mem_addr, Invalid);
                 }
                 :: state == Shared -> {
                     // [1.2] S|BusRdX
