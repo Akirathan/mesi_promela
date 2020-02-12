@@ -47,6 +47,12 @@ chan req_channel[CPU_COUNT] = [1] of {
 };
 chan resp_channel[CPU_COUNT] = [CPU_COUNT] of {mtype, int};
 
+// For signalling that a certain CPU ended its execution normally.
+chan end_channel = [CPU_COUNT] of {bool};
+
+#define ARE_ALL_CPUS_FINISHED \
+    full(end_channel)
+
 typedef cache_t {
     bit content[CACHE_SIZE];
     mtype cache_states[CACHE_SIZE];
@@ -348,6 +354,9 @@ proctype cpu(int mypid) {
     }
     // Respond at the end of all the operations - there may be some requests pending.
     respond(mypid);
+
+    // Signal end of execution
+    end_channel ! true;
 }
 
 inline init_caches() {
