@@ -30,12 +30,22 @@ mtype = {Modified, Exclusive, Shared, Invalid};
 // Signals
 mtype = {BusRd, BusRdX, BusUpgr};
 
+/**
+ * Every CPU is identified by integer. Let us describe the purpose of channels from
+ * the perspective of one CPU identified by cpu_idx.
+ *
+ * In req_channel[cpu_idx] there are requests made by other CPUs. This CPU is
+ * required to answer some of these requests via resp_channel[other_cpu_idx].
+ *
+ * Note that these requests do not require responses:
+ *   TODO...
+ */
 chan req_channel[CPU_COUNT] = [1] of {
     mtype, // Type of request
     int,   // memory address
     byte   // from (cpu_idx)
 };
-chan resp_channel[CPU_COUNT] = [1] of {mtype, int};
+chan resp_channel[CPU_COUNT] = [CPU_COUNT] of {mtype, int};
 
 typedef cache_t {
     bit content[CACHE_SIZE];
@@ -211,21 +221,13 @@ inline read(mypid, mem_addr) {
         }
         // Receive states from other CPUs.
         mtype next_state = Exclusive;
-        int cpu_idx;
-        for (cpu_idx : 0 .. CPU_COUNT - 1) {
             if
-            :: cpu_idx == mypid -> skip;
-            :: else -> {
-                if
-                :: resp_channel[cpu_idx] ? Invalid, mem_addr -> skip
-                :: resp_channel[cpu_idx] ? Exclusive, mem_addr -> next_state = Shared;
-                :: resp_channel[cpu_idx] ? Shared, mem_addr -> next_state = Shared;
+            :: resp_channel[mypid] ? Invalid, mem_addr -> skip
+            :: resp_channel[mypid] ? Exclusive, mem_addr -> next_state = Shared;
+            :: resp_channel[mypid] ? Shared, mem_addr -> next_state = Shared;
                 // TODO: This should not happen.
-                :: resp_channel[cpu_idx] ? Modified, mem_addr -> next_state = Shared;
-                fi
-            }
+            :: resp_channel[mypid] ? Modified, mem_addr -> next_state = Shared;
             fi
-        }
         assert next_state == Exclusive || next_state == Shared;
         change_state(mypid, mem_addr, next_state);
         CACHE_CONTENT(mypid, mem_addr) = memory[mem_addr];
