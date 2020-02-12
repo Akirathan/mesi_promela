@@ -37,23 +37,19 @@ chan req_channel[CPU_COUNT] = [1] of {
 };
 chan resp_channel[CPU_COUNT] = [1] of {mtype, int};
 
-typedef cache_state_t {
-    mtype cache_states[CACHE_SIZE];
-}
-
 typedef cache_t {
     bit content[CACHE_SIZE];
+    mtype cache_states[CACHE_SIZE];
 }
 
 bit memory[MEMORY_SIZE] = 0;
 cache_t caches[CPU_COUNT];
-cache_state_t cpu_states[CPU_COUNT];
 
 #define CACHE_ADDR(mem_addr) \
     mem_addr % CACHE_SIZE
 
 #define CACHE_STATE(cpu_idx, memaddr) \
-    cpu_states[cpu_idx].cache_states[CACHE_ADDR(memaddr)]
+    caches[cpu_idx].cache_states[CACHE_ADDR(memaddr)]
 
 #define CACHE_CONTENT(cpu_idx, memaddr) \
     caches[cpu_idx].content[CACHE_ADDR(memaddr)]
@@ -65,7 +61,7 @@ inline print_state(mypid) {
         int j;
         for (j : 0 .. CACHE_SIZE - 1) {
             printf("  %d (%e),\n", caches[mypid].content[j],
-                   cpu_states[mypid].cache_states[j]);
+                   caches[mypid].cache_states[j]);
         }
         printf("]\n");
     }
@@ -297,7 +293,7 @@ inline init_cachestates() {
     for (cpu_idx : 0 .. CPU_COUNT - 1) {
         int cache_addr;
         for (cache_addr : 0 .. CACHE_SIZE - 1) {
-            cpu_states[cpu_idx].cache_states[cache_addr] = Invalid;
+            caches[cpu_idx].cache_states[cache_addr] = Invalid;
         }
     }
 }
