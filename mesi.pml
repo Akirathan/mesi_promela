@@ -40,6 +40,7 @@ chan resp_channel[CPU_COUNT] = [1] of {mtype, int};
 typedef cache_t {
     bit content[CACHE_SIZE];
     mtype cache_states[CACHE_SIZE];
+    int tag[CACHE_SIZE]; // Tag is equal to memory address
 }
 
 bit memory[MEMORY_SIZE] = 0;
@@ -54,14 +55,16 @@ cache_t caches[CPU_COUNT];
 #define CACHE_CONTENT(cpu_idx, memaddr) \
     caches[cpu_idx].content[CACHE_ADDR(memaddr)]
 
+#define CACHE_TAG(cpu_idx, memaddr) \
+    caches[cpu_idx].tag[CACHE_ADDR(memaddr)]
 
 inline print_state(mypid) {
     atomic {
         printf("%d: CACHE = [\n", mypid)
         int j;
         for (j : 0 .. CACHE_SIZE - 1) {
-            printf("  %d (%e),\n", caches[mypid].content[j],
-                   caches[mypid].cache_states[j]);
+            printf("  %d (%e, tag=%d),\n", CACHE_CONTENT(mypid, j),
+                   CACHE_STATE(mypid, j), CACHE_TAG(mypid, j));
         }
         printf("]\n");
     }
@@ -226,12 +229,14 @@ inline read(mypid, mem_addr) {
         assert next_state == Exclusive || next_state == Shared;
         change_state(mypid, mem_addr, next_state);
         CACHE_CONTENT(mypid, mem_addr) = memory[mem_addr];
+        CACHE_TAG(mypid, mem_addr) = mem_addr;
     }
     :: curr_state == Exclusive || curr_state == Shared || curr_state == Modified -> {
         // [1.1] E|PrRd
         // Reading block in mem_addr should be a cache hit.
         // TODO: Does this assert make sense?
         assert CACHE_CONTENT(mypid, mem_addr) == memory[mem_addr];
+        assert CACHE_TAG(mypid, mem_addr) == mem_addr;
     }
     :: else -> ASSERT_NOT_REACHABLE;
     fi
@@ -244,19 +249,31 @@ inline write(mypid, mem_address, value) {
     if
     :: curr_state == Invalid -> {
         // [1.1] I|PrWr
+        atomic {
         signal_all(mypid, BusRdX, mem_address);
         change_state(mypid, mem_address, Modified);
         CACHE_CONTENT(mypid, mem_address) = value;
+            CACHE_TAG(mypid, mem_address) = mem_address;
+    }
     }
     :: curr_state == Exclusive -> {
         // [1.1] E|PrWr
+        atomic {
         change_state(mypid, mem_address, Modified);
         CACHE_CONTENT(mypid, mem_address) = value;
+            CACHE_TAG(mypid, mem_address) = mem_address;
+    }
     }
     :: curr_state == Shared -> {
         // [1.1] S|PrWr
+        atomic {
         signal_all(mypid, BusUpgr, mem_address);
         change_state(mypid, mem_address, Modified);
+            CACHE_CONTENT(mypid, mem_address) = value;
+            // Cache tag should already be set.
+            // TODO: Is this assert correct?
+            assert CACHE_TAG(mypid, mem_address) == mem_address;
+        }
     }
     fi
 }
@@ -288,29 +305,20 @@ proctype cpu(int mypid) {
     respond(mypid);
 }
 
-inline init_cachestates() {
-    int cpu_idx;
-    for (cpu_idx : 0 .. CPU_COUNT - 1) {
-        int cache_addr;
-        for (cache_addr : 0 .. CACHE_SIZE - 1) {
-            caches[cpu_idx].cache_states[cache_addr] = Invalid;
-        }
-    }
-}
-
 inline init_caches() {
     int cpu_idx;
     for (cpu_idx : 0 .. CPU_COUNT - 1) {
         int cache_addr;
         for (cache_addr : 0 .. CACHE_SIZE - 1) {
             // TODO: This produces error (warning?) - add SET_CACHE_CONTENT macro.
-            caches[cpu_idx].content[cache_addr] = 0;
+            CACHE_CONTENT(cpu_idx, cache_addr) = 0;
+            CACHE_STATE(cpu_idx, cache_addr) = Invalid;
+            CACHE_TAG(cpu_idx, cache_addr) = -1;
         }
     }
 }
 
 init {
-    init_cachestates();
     init_caches();
 
     int cpu_idx;
