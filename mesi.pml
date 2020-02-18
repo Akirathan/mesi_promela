@@ -138,6 +138,28 @@ two_modified:                       {
 
 active proctype monitor() {
     // TODO: Monitor untill all CPUs finished
+    skip;
+}
+
+/**
+ * A procedure called at the end of the simulation.
+ */
+inline flush_all() {
+    int cpu_idx;
+    for (cpu_idx : 0 .. CPU_COUNT - 1) {
+        respond(cpu_idx);
+    }
+
+    int cache_addr;
+    for (cpu_idx : 0 .. CPU_COUNT - 1) {
+        for (cache_addr : 0 .. CACHE_SIZE - 1) {
+            if :: CACHE_STATE(cpu_idx, cache_addr) == Modified -> {
+                memory[CACHE_TAG(cpu_idx, cache_addr)] = 
+                    CACHE_CONTENT(cpu_idx, cache_addr);
+            }
+            fi
+        }
+    }
 }
 
 
@@ -270,13 +292,13 @@ inline read(mypid, mem_addr) {
         }
         // Receive states from other CPUs.
         mtype next_state = Exclusive;
-            if
+        if
             :: resp_channel[mypid] ? Invalid, mem_addr -> skip
             :: resp_channel[mypid] ? Exclusive, mem_addr -> next_state = Shared;
             :: resp_channel[mypid] ? Shared, mem_addr -> next_state = Shared;
-                // TODO: This should not happen.
+            // TODO: This should not happen.
             :: resp_channel[mypid] ? Modified, mem_addr -> next_state = Shared;
-            fi
+        fi
         assert next_state == Exclusive || next_state == Shared;
         change_state(mypid, mem_addr, next_state);
         CACHE_CONTENT(mypid, mem_addr) = memory[mem_addr];
@@ -301,25 +323,25 @@ inline write(mypid, mem_address, value) {
     :: curr_state == Invalid -> {
         // [1.1] I|PrWr
         atomic {
-        signal_all(mypid, BusRdX, mem_address);
-        change_state(mypid, mem_address, Modified);
-        CACHE_CONTENT(mypid, mem_address) = value;
+            signal_all(mypid, BusRdX, mem_address);
+            change_state(mypid, mem_address, Modified);
+            CACHE_CONTENT(mypid, mem_address) = value;
             CACHE_TAG(mypid, mem_address) = mem_address;
-    }
+        }
     }
     :: curr_state == Exclusive -> {
         // [1.1] E|PrWr
         atomic {
-        change_state(mypid, mem_address, Modified);
-        CACHE_CONTENT(mypid, mem_address) = value;
+            change_state(mypid, mem_address, Modified);
+            CACHE_CONTENT(mypid, mem_address) = value;
             CACHE_TAG(mypid, mem_address) = mem_address;
-    }
+        }
     }
     :: curr_state == Shared -> {
         // [1.1] S|PrWr
         atomic {
-        signal_all(mypid, BusUpgr, mem_address);
-        change_state(mypid, mem_address, Modified);
+            signal_all(mypid, BusUpgr, mem_address);
+            change_state(mypid, mem_address, Modified);
             CACHE_CONTENT(mypid, mem_address) = value;
             // Cache tag should already be set.
             // TODO: Is this assert correct?
@@ -379,6 +401,10 @@ init {
     for (cpu_idx : 0 .. CPU_COUNT - 1) {
         run cpu(cpu_idx);
     }
+
+    // Wait for all CPUs to end their execution.
+    ARE_ALL_CPUS_FINISHED;
+    printf("Init: all CPUs finished execution.\n");
 }
 
 
