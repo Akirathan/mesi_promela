@@ -156,18 +156,27 @@ active proctype monitor() {
  * A procedure called at the end of the simulation.
  */
 inline flush_all() {
-    int cpu_idx;
-    for (cpu_idx : 0 .. CPU_COUNT - 1) {
-        respond(cpu_idx);
+    printf("Flushing all\n");
+    // TODO: Are the responds here necessary?
+    int _cpu_idx;
+    for (_cpu_idx : 0 .. CPU_COUNT - 1) {
+        respond(_cpu_idx);
     }
 
     int cache_addr;
-    for (cpu_idx : 0 .. CPU_COUNT - 1) {
+    for (_cpu_idx : 0 .. CPU_COUNT - 1) {
         for (cache_addr : 0 .. CACHE_SIZE - 1) {
-            if :: GET_CACHE_STATE(cpu_idx, cache_addr) == Modified -> {
-                memory[CACHE_TAG(cpu_idx, cache_addr)] = 
-                    CACHE_CONTENT(cpu_idx, cache_addr);
-            }
+            if 
+                :: CACHE_STATE(_cpu_idx, cache_addr) == Modified -> {
+                    printf("Flushing cpu_idx=%d, cache_addr=%d, mem_addr=%d, value=%d\n",
+                        _cpu_idx, cache_addr,
+                        CACHE_TAG(_cpu_idx, cache_addr),    // mem_addr
+                        CACHE_CONTENT(_cpu_idx, cache_addr) // value
+                    );
+                    memory[CACHE_TAG(_cpu_idx, cache_addr)] = 
+                            CACHE_CONTENT(_cpu_idx, cache_addr);
+                }
+                :: else -> skip;
             fi
         }
     }
@@ -187,7 +196,6 @@ inline signal_all(mypid, msgtype, mem_addr) {
                 // Do not signal self
                 :: _i == mypid -> skip;
                 :: else -> {
-                    printf("%d: Sending req_channel[%d] ! %e, %d, %d\n", mypid, _i, msgtype, mem_addr, mypid);
                     req_channel[_i] ! msgtype, mem_addr, mypid;
                 }
             fi
@@ -405,8 +413,17 @@ inline init_caches() {
     }
 }
 
+inline init_memory() {
+    int mem_addr;
+    for (mem_addr : 0 .. MEMORY_SIZE - 1) {
+        memory[mem_addr] = (mem_addr % 2 == 0 -> 0 : 1);
+    }
+}
+
 init {
     init_caches();
+    init_memory();
+    print_memory();
 
     int cpu_idx;
     for (cpu_idx : 0 .. CPU_COUNT - 1) {
@@ -416,6 +433,8 @@ init {
     // Wait for all CPUs to end their execution.
     ARE_ALL_CPUS_FINISHED;
     printf("Init: all CPUs finished execution.\n");
+    flush_all();
+    print_memory();
 }
 
 
