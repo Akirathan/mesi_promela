@@ -74,6 +74,17 @@ cache_t caches[CPU_COUNT];
 #define CACHE_TAG(cpu_idx, memaddr) \
     caches[cpu_idx].tag[CACHE_ADDR(memaddr)]
 
+// This "getter" and "setter" for cache state is preferable over CACHE_STATE, because it
+// also checks whether the tag of the cache entry corresponds.
+#define GET_CACHE_STATE(cpu_idx, memaddr)                    \
+    (CACHE_TAG(cpu_idx, memaddr) == memaddr ->  \
+        CACHE_STATE(cpu_idx, memaddr) :         \
+        Invalid)
+
+#define SET_CACHE_STATE(cpu_idx, memaddr, state) \
+    caches[cpu_idx].cache_states[CACHE_ADDR(memaddr)] = state
+
+
 inline print_state(mypid) {
     atomic {
         printf("%d: CACHE = [\n", mypid)
@@ -103,7 +114,7 @@ inline check_for_two_modified_cachelines() {
         int cache_addr;
         for (cache_addr : 0 .. CACHE_SIZE - 1) {
             if
-                :: CACHE_STATE(cpu_idx, cache_addr) == Modified -> {
+                :: GET_CACHE_STATE(cpu_idx, cache_addr) == Modified -> {
                     // Check if other cpu has modified state
                     int tag = CACHE_TAG(cpu_idx, cache_addr);
                     assert tag != -1;
@@ -116,7 +127,7 @@ inline check_for_two_modified_cachelines() {
                             int other_cache_addr;
                             for (other_cache_addr : 0 .. CACHE_SIZE - 1) {
                                 if
-                                    :: CACHE_STATE(other_cpu_idx, other_cache_addr) == Modified &&
+                                    :: GET_CACHE_STATE(other_cpu_idx, other_cache_addr) == Modified &&
                                     CACHE_TAG(other_cpu_idx, other_cache_addr) == tag -> 
 two_modified:                       {
                                         printf("Monitor: At two_modified, printing state:\n");
@@ -153,18 +164,13 @@ inline flush_all() {
     int cache_addr;
     for (cpu_idx : 0 .. CPU_COUNT - 1) {
         for (cache_addr : 0 .. CACHE_SIZE - 1) {
-            if :: CACHE_STATE(cpu_idx, cache_addr) == Modified -> {
+            if :: GET_CACHE_STATE(cpu_idx, cache_addr) == Modified -> {
                 memory[CACHE_TAG(cpu_idx, cache_addr)] = 
                     CACHE_CONTENT(cpu_idx, cache_addr);
             }
             fi
         }
     }
-}
-
-
-inline print_state(mypid) {
-    printf("%d: ")
 }
 
 
@@ -197,7 +203,7 @@ inline flush_and_invalidate(mypid, memaddr) {
 }
 
 inline change_state(mypid, mem_addr, new_state) {
-    mtype old_state = CACHE_STATE(mypid, mem_addr);
+    mtype old_state = GET_CACHE_STATE(mypid, mem_addr);
     printf("%d: State %e --> %e, mem_addr=%d, cache_addr=%d\n",
         mypid, old_state, new_state, mem_addr, CACHE_ADDR(mem_addr));
 
@@ -206,7 +212,7 @@ inline change_state(mypid, mem_addr, new_state) {
            (old_state == Shared && (new_state == Modified || new_state == Invalid)) ||
            (old_state == Invalid && (new_state == Modified || new_state == Exclusive || new_state == Shared))
 
-    CACHE_STATE(mypid, mem_addr) = new_state;
+    SET_CACHE_STATE(mypid, mem_addr, new_state);
 }
 
 /**
@@ -222,7 +228,8 @@ inline respond(mypid) {
         /**************  BusRd  ****************/
         :: req_channel[mypid] ? [BusRd, recved_mem_addr, sender_pid] -> {
             req_channel[mypid] ? BusRd, recved_mem_addr, sender_pid;
-            mtype my_old_cache_state = CACHE_STATE(mypid, recved_mem_addr);
+            // TODO: We have to check whether tag corresponds to recved_mem_addr.
+            mtype my_old_cache_state = GET_CACHE_STATE(mypid, recved_mem_addr);
             printf("%d: Got msg={BusRd,%d} from %d, my_old_cache_state=%e\n",
                 mypid, recved_mem_addr, mypid, my_old_cache_state);
             if
@@ -238,7 +245,7 @@ inline respond(mypid) {
                 :: my_old_cache_state == Invalid -> skip;
             fi
 
-            mtype my_new_cache_state = CACHE_STATE(mypid, recved_mem_addr);
+            mtype my_new_cache_state = GET_CACHE_STATE(mypid, recved_mem_addr);
             printf("%d: Sending msg={%e,%d} to %d\n", mypid, my_new_cache_state, recved_mem_addr, sender_pid);
             resp_channel[sender_pid] ! my_new_cache_state, recved_mem_addr;
         }
@@ -249,7 +256,7 @@ inline respond(mypid) {
             printf("%d: Got msg={BusUpgr,%d} from %d\n", mypid, recved_mem_addr, sender_pid);
             // TODO: There is no need to respond to this -> finaly our state will
             // be invalid.
-            mtype my_state = CACHE_STATE(mypid, recved_mem_addr);
+            mtype my_state = GET_CACHE_STATE(mypid, recved_mem_addr);
             assert my_state == Invalid || my_state == Shared;
             change_state(mypid, recved_mem_addr, Invalid);
         }
@@ -260,7 +267,7 @@ inline respond(mypid) {
             printf("%d: Got msg={BusRdX,%d} from %d\n", mypid, recved_mem_addr, sender_pid)
             // TODO: There is no need to respond to this -> finaly our state will
             // be invalid
-            mtype state = CACHE_STATE(mypid, recved_mem_addr);
+            mtype state = GET_CACHE_STATE(mypid, recved_mem_addr);
             if
                 :: state == Invalid -> skip;
                 :: state == Exclusive -> {
@@ -287,7 +294,7 @@ inline respond(mypid) {
 inline read(mypid, mem_addr) {
     printf("%d: Reading mem_addr %d\n", mypid, mem_addr);
 
-    mtype curr_state = CACHE_STATE(mypid, mem_addr);
+    mtype curr_state = GET_CACHE_STATE(mypid, mem_addr);
     if
     :: curr_state == Invalid -> {
         // [1.1] I|PrRd
@@ -323,7 +330,7 @@ inline read(mypid, mem_addr) {
 inline write(mypid, mem_address, value) {
     printf("%d: Writing %d to mem_address %d\n", mypid, value, mem_address);
 
-    mtype curr_state = CACHE_STATE(mypid, mem_address);
+    mtype curr_state = GET_CACHE_STATE(mypid, mem_address);
     if
     :: curr_state == Invalid -> {
         // [1.1] I|PrWr
@@ -391,9 +398,8 @@ inline init_caches() {
     for (cpu_idx : 0 .. CPU_COUNT - 1) {
         int cache_addr;
         for (cache_addr : 0 .. CACHE_SIZE - 1) {
-            // TODO: This produces error (warning?) - add SET_CACHE_CONTENT macro.
             CACHE_CONTENT(cpu_idx, cache_addr) = 0;
-            CACHE_STATE(cpu_idx, cache_addr) = Invalid;
+            SET_CACHE_STATE(cpu_idx, cache_addr, Invalid);
             CACHE_TAG(cpu_idx, cache_addr) = -1;
         }
     }
