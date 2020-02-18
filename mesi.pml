@@ -30,33 +30,137 @@ mtype = {Modified, Exclusive, Shared, Invalid};
 // Signals
 mtype = {BusRd, BusRdX, BusUpgr};
 
+/**
+ * Every CPU is identified by integer. Let us describe the purpose of channels from
+ * the perspective of one CPU identified by cpu_idx.
+ *
+ * In req_channel[cpu_idx] there are requests made by other CPUs. This CPU is
+ * required to answer some of these requests via resp_channel[other_cpu_idx].
+ *
+ * Note that these requests do not require responses:
+ *   TODO...
+ */
 chan req_channel[CPU_COUNT] = [1] of {
     mtype, // Type of request
     int,   // memory address
     byte   // from (cpu_idx)
 };
-chan resp_channel[CPU_COUNT] = [1] of {mtype, int};
+chan resp_channel[CPU_COUNT] = [CPU_COUNT] of {mtype, int};
 
-typedef cache_state_t {
-    mtype cache_states[CACHE_SIZE];
-}
+// For signalling that a certain CPU ended its execution normally.
+chan end_channel = [CPU_COUNT] of {bool};
+
+#define ARE_ALL_CPUS_FINISHED \
+    full(end_channel)
 
 typedef cache_t {
     bit content[CACHE_SIZE];
+    mtype cache_states[CACHE_SIZE];
+    int tag[CACHE_SIZE]; // Tag is equal to memory address
 }
 
 bit memory[MEMORY_SIZE] = 0;
 cache_t caches[CPU_COUNT];
-cache_state_t cpu_states[CPU_COUNT];
 
 #define CACHE_ADDR(mem_addr) \
     mem_addr % CACHE_SIZE
 
 #define CACHE_STATE(cpu_idx, memaddr) \
-    cpu_states[cpu_idx].cache_states[CACHE_ADDR(memaddr)]
+    caches[cpu_idx].cache_states[CACHE_ADDR(memaddr)]
 
 #define CACHE_CONTENT(cpu_idx, memaddr) \
     caches[cpu_idx].content[CACHE_ADDR(memaddr)]
+
+#define CACHE_TAG(cpu_idx, memaddr) \
+    caches[cpu_idx].tag[CACHE_ADDR(memaddr)]
+
+inline print_state(mypid) {
+    atomic {
+        printf("%d: CACHE = [\n", mypid)
+        int j;
+        for (j : 0 .. CACHE_SIZE - 1) {
+            printf("  %d (%e, tag=%d),\n", CACHE_CONTENT(mypid, j),
+                   CACHE_STATE(mypid, j), CACHE_TAG(mypid, j));
+        }
+        printf("]\n");
+    }
+}
+
+inline print_memory() {
+    atomic {
+        printf("MEMORY = [\n");
+        int j;
+        for (j : 0 .. MEMORY_SIZE - 1) {
+            printf("  %d,\n", memory[j]);
+        }
+        printf("]\n");
+    }
+}
+
+inline check_for_two_modified_cachelines() {
+    int cpu_idx;
+    for (cpu_idx : 0 .. CPU_COUNT - 1) {
+        int cache_addr;
+        for (cache_addr : 0 .. CACHE_SIZE - 1) {
+            if
+                :: CACHE_STATE(cpu_idx, cache_addr) == Modified -> {
+                    // Check if other cpu has modified state
+                    int tag = CACHE_TAG(cpu_idx, cache_addr);
+                    assert tag != -1;
+                    // TODO: Make more efficient.
+                    atomic {
+                        // We should not find any other cpu that has a Modified cache line
+                        // with same tag.
+                        int other_cpu_idx;
+                        for (other_cpu_idx : (cpu_idx + 1) .. (CPU_COUNT - 1)) {
+                            int other_cache_addr;
+                            for (other_cache_addr : 0 .. CACHE_SIZE - 1) {
+                                if
+                                    :: CACHE_STATE(other_cpu_idx, other_cache_addr) == Modified &&
+                                    CACHE_TAG(other_cpu_idx, other_cache_addr) == tag -> 
+two_modified:                       {
+                                        printf("Monitor: At two_modified, printing state:\n");
+                                        print_state(cpu_idx);
+                                        print_state(other_cpu_idx);
+                                        print_memory();
+                                    }
+                                    :: else -> skip;
+                                fi
+                            }
+                        }
+                    }
+                }
+                :: else -> skip;
+            fi
+        }
+    }
+}
+
+active proctype monitor() {
+    // TODO: Monitor untill all CPUs finished
+    skip;
+}
+
+/**
+ * A procedure called at the end of the simulation.
+ */
+inline flush_all() {
+    int cpu_idx;
+    for (cpu_idx : 0 .. CPU_COUNT - 1) {
+        respond(cpu_idx);
+    }
+
+    int cache_addr;
+    for (cpu_idx : 0 .. CPU_COUNT - 1) {
+        for (cache_addr : 0 .. CACHE_SIZE - 1) {
+            if :: CACHE_STATE(cpu_idx, cache_addr) == Modified -> {
+                memory[CACHE_TAG(cpu_idx, cache_addr)] = 
+                    CACHE_CONTENT(cpu_idx, cache_addr);
+            }
+            fi
+        }
+    }
+}
 
 
 inline print_state(mypid) {
@@ -161,7 +265,7 @@ inline respond(mypid) {
                 :: state == Invalid -> skip;
                 :: state == Exclusive -> {
                     // [1.2] E|BusRdX
-                    flush_and_invalidate(mypid, recved_mem_addr);
+                    change_state(mypid, recved_mem_addr, Invalid);
                 }
                 :: state == Shared -> {
                     // [1.2] S|BusRdX
@@ -193,30 +297,24 @@ inline read(mypid, mem_addr) {
         }
         // Receive states from other CPUs.
         mtype next_state = Exclusive;
-        int cpu_idx;
-        for (cpu_idx : 0 .. CPU_COUNT - 1) {
-            if
-            :: cpu_idx == mypid -> skip;
-            :: else -> {
-                if
-                :: resp_channel[cpu_idx] ? Invalid, mem_addr -> skip
-                :: resp_channel[cpu_idx] ? Exclusive, mem_addr -> next_state = Shared;
-                :: resp_channel[cpu_idx] ? Shared, mem_addr -> next_state = Shared;
-                // TODO: This should not happen.
-                :: resp_channel[cpu_idx] ? Modified, mem_addr -> next_state = Shared;
-                fi
-            }
-            fi
-        }
+        if
+            :: resp_channel[mypid] ? Invalid, mem_addr -> skip
+            :: resp_channel[mypid] ? Exclusive, mem_addr -> next_state = Shared;
+            :: resp_channel[mypid] ? Shared, mem_addr -> next_state = Shared;
+            // TODO: This should not happen.
+            :: resp_channel[mypid] ? Modified, mem_addr -> next_state = Shared;
+        fi
         assert next_state == Exclusive || next_state == Shared;
         change_state(mypid, mem_addr, next_state);
         CACHE_CONTENT(mypid, mem_addr) = memory[mem_addr];
+        CACHE_TAG(mypid, mem_addr) = mem_addr;
     }
     :: curr_state == Exclusive || curr_state == Shared || curr_state == Modified -> {
         // [1.1] E|PrRd
         // Reading block in mem_addr should be a cache hit.
         // TODO: Does this assert make sense?
         assert CACHE_CONTENT(mypid, mem_addr) == memory[mem_addr];
+        assert CACHE_TAG(mypid, mem_addr) == mem_addr;
     }
     :: else -> ASSERT_NOT_REACHABLE;
     fi
@@ -229,19 +327,31 @@ inline write(mypid, mem_address, value) {
     if
     :: curr_state == Invalid -> {
         // [1.1] I|PrWr
-        signal_all(mypid, BusRdX, mem_address);
-        change_state(mypid, mem_address, Modified);
-        CACHE_CONTENT(mypid, mem_address) = value;
+        atomic {
+            signal_all(mypid, BusRdX, mem_address);
+            change_state(mypid, mem_address, Modified);
+            CACHE_CONTENT(mypid, mem_address) = value;
+            CACHE_TAG(mypid, mem_address) = mem_address;
+        }
     }
     :: curr_state == Exclusive -> {
         // [1.1] E|PrWr
-        change_state(mypid, mem_address, Modified);
-        CACHE_CONTENT(mypid, mem_address) = value;
+        atomic {
+            change_state(mypid, mem_address, Modified);
+            CACHE_CONTENT(mypid, mem_address) = value;
+            CACHE_TAG(mypid, mem_address) = mem_address;
+        }
     }
     :: curr_state == Shared -> {
         // [1.1] S|PrWr
-        signal_all(mypid, BusUpgr, mem_address);
-        change_state(mypid, mem_address, Modified);
+        atomic {
+            signal_all(mypid, BusUpgr, mem_address);
+            change_state(mypid, mem_address, Modified);
+            CACHE_CONTENT(mypid, mem_address) = value;
+            // Cache tag should already be set.
+            // TODO: Is this assert correct?
+            assert CACHE_TAG(mypid, mem_address) == mem_address;
+        }
     }
     fi
 }
@@ -266,19 +376,14 @@ proctype cpu(int mypid) {
             write(mypid, mem_addr, value);
         }
         fi
+        print_state(mypid);
+        print_memory();
     }
     // Respond at the end of all the operations - there may be some requests pending.
     respond(mypid);
-}
 
-inline init_cachestates() {
-    int cpu_idx;
-    for (cpu_idx : 0 .. CPU_COUNT - 1) {
-        int cache_addr;
-        for (cache_addr : 0 .. CACHE_SIZE - 1) {
-            cpu_states[cpu_idx].cache_states[cache_addr] = Invalid;
-        }
-    }
+    // Signal end of execution
+    end_channel ! true;
 }
 
 inline init_caches() {
@@ -287,19 +392,24 @@ inline init_caches() {
         int cache_addr;
         for (cache_addr : 0 .. CACHE_SIZE - 1) {
             // TODO: This produces error (warning?) - add SET_CACHE_CONTENT macro.
-            caches[cpu_idx].content[cache_addr] = 0;
+            CACHE_CONTENT(cpu_idx, cache_addr) = 0;
+            CACHE_STATE(cpu_idx, cache_addr) = Invalid;
+            CACHE_TAG(cpu_idx, cache_addr) = -1;
         }
     }
 }
 
 init {
-    init_cachestates();
     init_caches();
 
     int cpu_idx;
     for (cpu_idx : 0 .. CPU_COUNT - 1) {
         run cpu(cpu_idx);
     }
+
+    // Wait for all CPUs to end their execution.
+    ARE_ALL_CPUS_FINISHED;
+    printf("Init: all CPUs finished execution.\n");
 }
 
 
