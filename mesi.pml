@@ -147,9 +147,29 @@ two_modified:                       {
     }
 }
 
-active proctype monitor() {
-    // TODO: Monitor untill all CPUs finished
-    skip;
+inline write_not_lost(cpu_idx) {
+    int cache_addr;
+    for (cache_addr : 0 .. CACHE_SIZE - 1) {
+        if
+            :: CACHE_STATE(cpu_idx, cache_addr) == Modified -> {
+                // In the future, the value should be written to memory.
+                bit value = CACHE_CONTENT(cpu_idx, cache_addr);
+                int mem_addr = CACHE_TAG(cpu_idx, cache_addr);
+                printf("Monitor(%d): waiting for value %d to be written to mem_addr=%d\n",
+                    cpu_idx, value, mem_addr);
+                // TODO: This statement should be executable before the end.
+                memory[mem_addr] == value;
+            }
+            :: else -> skip;
+        fi
+    }
+}
+
+proctype monitor(int cpu_idx) {
+    do
+        :: write_not_lost(cpu_idx);
+        :: ARE_ALL_CPUS_FINISHED -> break;
+    od
 }
 
 /**
@@ -426,8 +446,11 @@ init {
     print_memory();
 
     int cpu_idx;
-    for (cpu_idx : 0 .. CPU_COUNT - 1) {
-        run cpu(cpu_idx);
+    atomic {
+        for (cpu_idx : 0 .. CPU_COUNT - 1) {
+            run monitor(cpu_idx);
+            run cpu(cpu_idx);
+        }
     }
 
     // Wait for all CPUs to end their execution.
