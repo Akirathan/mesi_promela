@@ -315,11 +315,13 @@ inline respond(mypid) {
         :: req_channel[mypid] ? [BusUpgr, recved_mem_addr, sender_pid] -> {
             req_channel[mypid] ? BusUpgr, recved_mem_addr, sender_pid;
             printf("%d: Got msg={BusUpgr,%d} from %d\n", mypid, recved_mem_addr, sender_pid);
-            // TODO: There is no need to respond to this -> finaly our state will
-            // be invalid.
             mtype my_state = GET_CACHE_STATE(mypid, recved_mem_addr);
             assert my_state == Invalid || my_state == Shared;
-            change_state(mypid, recved_mem_addr, Invalid);
+            if
+                :: my_state != Invalid -> change_state(mypid, recved_mem_addr, Invalid);
+                :: else -> skip;
+            fi
+            resp_channel[sender_pid] ! Invalid, recved_mem_addr;
         }
 
         /**************  BusRdX  ****************/
@@ -412,14 +414,32 @@ inline write(mypid, mem_address, value) {
     }
     :: curr_state == Shared -> {
         // [1.1] S|PrWr
-        atomic {
+        respond(mypid);
+        if
+            // respond may have changed our cache state, so we have to check whether
+            // it was not changed. Note that this situation may happen when two
+            // CPUs have Shared cache-entries and they want to write to them, so
+            // both of them would send BusUpgr.
+            :: GET_CACHE_STATE(mypid, mem_address) == Shared -> {
             signal_all(mypid, BusUpgr, mem_address);
+                // Receive acknowledgement from every other CPU.
+                int other_cpu_idx;
+                for (other_cpu_idx : 0 .. CPU_COUNT - 2) {
+                    resp_channel[mypid] ? Invalid, _;
+                }
             change_state(mypid, mem_address, Modified);
             CACHE_CONTENT(mypid, mem_address) = value;
             // Cache tag should already be set.
             // TODO: Is this assert correct?
             assert CACHE_TAG(mypid, mem_address) == mem_address;
         }
+            // Some other CPU sent us BusUpgr signal and we have invalidated
+            // our cacheline, which means that we will not write to the cache
+            // at the moment.
+            :: else -> {
+                assert GET_CACHE_STATE(mypid, mem_address) == Invalid;
+            }
+        fi
     }
     fi
 }
