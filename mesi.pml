@@ -147,6 +147,9 @@ two_modified:                       {
     }
 }
 
+/**
+ * If there is a Modified cache entry, it should be written to memory in the future.
+ */
 inline write_not_lost(cpu_idx) {
     int cache_addr;
     for (cache_addr : 0 .. CACHE_SIZE - 1) {
@@ -170,6 +173,28 @@ proctype monitor(int cpu_idx) {
         :: write_not_lost(cpu_idx);
         :: ARE_ALL_CPUS_FINISHED -> break;
     od
+}
+
+/**
+ * If there is a Modified cache entry, it should be written to memory in the future.
+ *
+ * _8_2_mem_addr is an address of memory that we want to modify (defined in proctype CPU,
+ * and passed to write).
+ */
+ltl ltl_write_not_lost {
+    [](cpu[0]@modified -> <> (cpu[0]@flush && cpu[0]:_8_2_mem_addr == cpu[0]:_8_2_2_recved_mem_addr))
+}
+
+/**
+ * If there is an Exclusive cache entry with a specific tag, there should not exist
+ * Exclusive cache entry in any other CPU cache with such a tag.
+ */
+ltl ltl_one_exclusive {
+    // If CPU 0 marks 0-th cache entry (with tag 0) as Exclusive,
+    // then CPU 1 should not have 0-th cache entry markes as Exclusive.
+    [] (cpu[0]@exclusive && cpu[0]:_8_2_mem_addr == 0 -> (
+        CACHE_STATE(1, 0) != Exclusive
+    ))
 }
 
 /**
@@ -226,7 +251,7 @@ inline signal_all(mypid, msgtype, mem_addr) {
 inline flush_and_invalidate(mypid, memaddr) {
     // TODO: Enclose in atomic?
     printf("%d: memory[%d] = %d\n", mypid, memaddr, CACHE_CONTENT(mypid, memaddr));
-    memory[memaddr] = CACHE_CONTENT(mypid, memaddr);
+flush:    memory[memaddr] = CACHE_CONTENT(mypid, memaddr);
     change_state(mypid, memaddr, Invalid);
 }
 
@@ -239,6 +264,14 @@ inline change_state(mypid, mem_addr, new_state) {
            (old_state == Exclusive && (new_state == Modified || new_state == Shared || new_state == Invalid)) ||
            (old_state == Shared && (new_state == Modified || new_state == Invalid)) ||
            (old_state == Invalid && (new_state == Modified || new_state == Exclusive || new_state == Shared))
+
+    if
+        :: new_state == Modified -> 
+modified:   skip;
+        :: new_state == Exclusive ->
+exclusive:  skip;
+        :: else -> skip;
+    fi
 
     SET_CACHE_STATE(mypid, mem_addr, new_state);
 }
