@@ -367,6 +367,8 @@ inline read(mypid, mem_addr) {
         }
         // Receive states from other CPUs.
         mtype next_state = Exclusive;
+        int other_cpu_idx;
+        for (other_cpu_idx : 0 .. CPU_COUNT - 2) {
         if
             :: resp_channel[mypid] ? Invalid, mem_addr -> skip
             :: resp_channel[mypid] ? Exclusive, mem_addr -> next_state = Shared;
@@ -374,6 +376,7 @@ inline read(mypid, mem_addr) {
             // TODO: This should not happen.
             :: resp_channel[mypid] ? Modified, mem_addr -> next_state = Shared;
         fi
+        }
         assert next_state == Exclusive || next_state == Shared;
         change_state(mypid, mem_addr, next_state);
         CACHE_CONTENT(mypid, mem_addr) = memory[mem_addr];
