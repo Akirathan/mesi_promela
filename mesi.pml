@@ -40,7 +40,7 @@ mtype = {BusRd, BusRdX, BusUpgr};
  * Note that these requests do not require responses:
  *   TODO...
  */
-chan req_channel[CPU_COUNT] = [1] of {
+chan req_channel[CPU_COUNT] = [CPU_COUNT] of {
     mtype, // Type of request
     int,   // memory address
     byte   // from (cpu_idx)
