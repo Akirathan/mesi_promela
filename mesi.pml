@@ -22,7 +22,7 @@
 #define CACHE_SIZE 2
 #define MEMORY_SIZE 4
 // Number of one CPU's writes and reads.
-#define STEP_NUM 1
+#define STEP_NUM 2
 #define ASSERT_NOT_REACHABLE assert(false)
 
 // Cache state
