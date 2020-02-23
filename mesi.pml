@@ -25,6 +25,7 @@
 #define STEP_NUM 2
 #define ASSERT_NOT_REACHABLE assert(false)
 //#define RUN_WITH_MONITORS
+//#define LTL_FORMULAS
 
 // Cache state
 mtype = {Modified, Exclusive, Shared, Invalid};
@@ -179,6 +180,7 @@ proctype monitor(int cpu_idx) {
     skip;
 }
 
+#ifdef LTL_FORMULAS
 /**
  * If there is a Modified cache entry, it should be written to memory in the future.
  *
@@ -200,6 +202,7 @@ ltl ltl_one_exclusive {
         CACHE_STATE(1, 0) != Exclusive
     ))
 }
+#endif // LTL_FORMULAS
 
 /**
  * A procedure called at the end of the simulation.
