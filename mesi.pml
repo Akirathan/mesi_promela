@@ -252,6 +252,16 @@ inline signal_all(mypid, msgtype, mem_addr) {
     }
 }
 
+/**
+ * Other CPU responding with Invalid means "acknowledgement" in certain situations.
+ */
+inline receive_acks(mypid) {
+    int __i;
+    for (__i : 0 .. CPU_COUNT - 2) {
+        resp_channel[mypid] ? Invalid, _;
+    }
+}
+
 inline flush_and_invalidate(mypid, memaddr) {
     // TODO: Enclose in atomic?
     printf("%d: memory[%d] = %d\n", mypid, memaddr, CACHE_CONTENT(mypid, memaddr));
@@ -325,6 +335,7 @@ inline respond(mypid) {
                 :: my_state != Invalid -> change_state(mypid, recved_mem_addr, Invalid);
                 :: else -> skip;
             fi
+            printf("%d: Sending msg={%e,%d} to %d\n", mypid, Invalid, recved_mem_addr, sender_pid);
             resp_channel[sender_pid] ! Invalid, recved_mem_addr;
         }
 
@@ -350,6 +361,8 @@ inline respond(mypid) {
                     flush_and_invalidate(mypid, recved_mem_addr);
                 }
             fi
+            printf("%d: Sending msg={%e,%d} to %d\n", mypid, Invalid, recved_mem_addr, sender_pid);
+            resp_channel[sender_pid] ! Invalid, recved_mem_addr;
         }
 
         // We do not want to block here if there are no requests for current CPU.
@@ -366,20 +379,20 @@ inline read(mypid, mem_addr) {
     :: curr_state == Invalid -> {
         // [1.1] I|PrRd
         atomic {
-            signal_all(mypid, BusRd, mem_addr);
             respond(mypid);
+            signal_all(mypid, BusRd, mem_addr);
         }
         // Receive states from other CPUs.
         mtype next_state = Exclusive;
         int other_cpu_idx;
         for (other_cpu_idx : 0 .. CPU_COUNT - 2) {
-        if
-            :: resp_channel[mypid] ? Invalid, mem_addr -> skip
-            :: resp_channel[mypid] ? Exclusive, mem_addr -> next_state = Shared;
-            :: resp_channel[mypid] ? Shared, mem_addr -> next_state = Shared;
-            // TODO: This should not happen.
-            :: resp_channel[mypid] ? Modified, mem_addr -> next_state = Shared;
-        fi
+            if
+                :: resp_channel[mypid] ? Invalid, mem_addr -> skip
+                :: resp_channel[mypid] ? Exclusive, mem_addr -> next_state = Shared;
+                :: resp_channel[mypid] ? Shared, mem_addr -> next_state = Shared;
+                // TODO: This should not happen.
+                :: resp_channel[mypid] ? Modified, mem_addr -> next_state = Shared;
+            fi
         }
         assert next_state == Exclusive || next_state == Shared;
         change_state(mypid, mem_addr, next_state);
@@ -418,10 +431,16 @@ inline write(mypid, mem_address, value) {
     :: curr_state == Invalid -> {
         // [1.1] I|PrWr
         atomic {
+            respond(mypid);
             signal_all(mypid, BusRdX, mem_address);
-            change_state(mypid, mem_address, Modified);
+        }
+        receive_acks(mypid);
+
+        // TODO: Is this atomic necessary?
+        atomic {
             CACHE_CONTENT(mypid, mem_address) = value;
             CACHE_TAG(mypid, mem_address) = mem_address;
+            change_state(mypid, mem_address, Modified);
         }
     }
     :: curr_state == Exclusive -> {
@@ -441,18 +460,14 @@ inline write(mypid, mem_address, value) {
             // CPUs have Shared cache-entries and they want to write to them, so
             // both of them would send BusUpgr.
             :: GET_CACHE_STATE(mypid, mem_address) == Shared -> {
-            signal_all(mypid, BusUpgr, mem_address);
-                // Receive acknowledgement from every other CPU.
-                int other_cpu_idx;
-                for (other_cpu_idx : 0 .. CPU_COUNT - 2) {
-                    resp_channel[mypid] ? Invalid, _;
-                }
-            change_state(mypid, mem_address, Modified);
-            CACHE_CONTENT(mypid, mem_address) = value;
-            // Cache tag should already be set.
-            // TODO: Is this assert correct?
-            assert CACHE_TAG(mypid, mem_address) == mem_address;
-        }
+                signal_all(mypid, BusUpgr, mem_address);
+                receive_acks(mypid);
+                change_state(mypid, mem_address, Modified);
+                CACHE_CONTENT(mypid, mem_address) = value;
+                // Cache tag should already be set.
+                // TODO: Is this assert correct?
+                assert CACHE_TAG(mypid, mem_address) == mem_address;
+            }
             // Some other CPU sent us BusUpgr signal and we have invalidated
             // our cacheline, which means that we will not write to the cache
             // at the moment.
