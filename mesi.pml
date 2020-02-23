@@ -403,6 +403,16 @@ inline read(mypid, mem_addr) {
 inline write(mypid, mem_address, value) {
     printf("%d: Writing %d to mem_address %d\n", mypid, value, mem_address);
 
+    if
+        :: CACHE_TAG(mypid, mem_address) != mem_address &&
+            GET_CACHE_STATE(mypid, mem_address) == Modified ->
+        {
+            // We want to rewrite contents of this cache line, however it is Modified, therefore
+            // we need to flush it first.
+            flush_and_invalidate(mypid, mem_address);
+        }
+    fi
+
     mtype curr_state = GET_CACHE_STATE(mypid, mem_address);
     if
     :: curr_state == Invalid -> {
