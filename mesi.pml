@@ -24,6 +24,7 @@
 // Number of one CPU's writes and reads.
 #define STEP_NUM 2
 #define ASSERT_NOT_REACHABLE assert(false)
+//#define RUN_WITH_MONITORS
 
 // Cache state
 mtype = {Modified, Exclusive, Shared, Invalid};
@@ -169,20 +170,23 @@ inline write_not_lost(cpu_idx) {
 }
 
 proctype monitor(int cpu_idx) {
+#ifdef RUN_WITH_MONITORS
     do
         :: write_not_lost(cpu_idx);
         :: ARE_ALL_CPUS_FINISHED -> break;
     od
+#endif
+    skip;
 }
 
 /**
  * If there is a Modified cache entry, it should be written to memory in the future.
  *
- * _8_2_mem_addr is an address of memory that we want to modify (defined in proctype CPU,
+ * _8_1_mem_addr is an address of memory that we want to modify (defined in proctype CPU,
  * and passed to write).
  */
 ltl ltl_write_not_lost {
-    [](cpu[0]@modified -> <> (cpu[0]@flush && cpu[0]:_8_2_mem_addr == cpu[0]:_8_2_2_recved_mem_addr))
+    [](cpu[0]@modified -> <> (cpu[0]@flush && cpu[0]:_8_1_mem_addr == cpu[0]:_8_1_1_recved_mem_addr))
 }
 
 /**
@@ -192,7 +196,7 @@ ltl ltl_write_not_lost {
 ltl ltl_one_exclusive {
     // If CPU 0 marks 0-th cache entry (with tag 0) as Exclusive,
     // then CPU 1 should not have 0-th cache entry markes as Exclusive.
-    [] (cpu[0]@exclusive && cpu[0]:_8_2_mem_addr == 0 -> (
+    [] (cpu[0]@exclusive && cpu[0]:_8_1_mem_addr == 0 -> (
         CACHE_STATE(1, 0) != Exclusive
     ))
 }
@@ -504,7 +508,9 @@ init {
     int cpu_idx;
     atomic {
         for (cpu_idx : 0 .. CPU_COUNT - 1) {
+#ifdef RUN_WITH_MONITORS
             run monitor(cpu_idx);
+#endif
             run cpu(cpu_idx);
         }
     }
