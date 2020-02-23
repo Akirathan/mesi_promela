@@ -386,11 +386,14 @@ inline read(mypid, mem_addr) {
         CACHE_CONTENT(mypid, mem_addr) = memory[mem_addr];
         CACHE_TAG(mypid, mem_addr) = mem_addr;
     }
-    :: curr_state == Exclusive || curr_state == Shared || curr_state == Modified -> {
+    :: curr_state == Exclusive || curr_state == Shared -> {
         // [1.1] E|PrRd
-        // Reading block in mem_addr should be a cache hit.
+        // Reading cache line in mem_addr should be a cache hit.
         // TODO: Does this assert make sense?
         assert CACHE_CONTENT(mypid, mem_addr) == memory[mem_addr];
+        assert CACHE_TAG(mypid, mem_addr) == mem_addr;
+    }
+    :: curr_state == Modified -> {
         assert CACHE_TAG(mypid, mem_addr) == mem_addr;
     }
     :: else -> ASSERT_NOT_REACHABLE;
