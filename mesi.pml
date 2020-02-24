@@ -275,6 +275,11 @@ flush:    memory[memaddr] = CACHE_CONTENT(mypid, memaddr);
 
 inline change_state(mypid, mem_addr, new_state) {
     mtype old_state = GET_CACHE_STATE(mypid, mem_addr);
+    if
+        :: old_state == new_state -> goto end;
+        :: else -> skip;
+    fi
+
     printf("%d: State %e --> %e, mem_addr=%d, cache_addr=%d\n",
         mypid, old_state, new_state, mem_addr, CACHE_ADDR(mem_addr));
 
@@ -295,6 +300,8 @@ exclusive:  skip;
     fi
 
     SET_CACHE_STATE(mypid, mem_addr, new_state);
+end:
+    skip;
 }
 
 /**
