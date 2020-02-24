@@ -31,6 +31,8 @@
 mtype = {Modified, Exclusive, Shared, Invalid};
 // Signals
 mtype = {BusRd, BusRdX, BusUpgr};
+// Intentions
+mtype = {Read, Write};
 
 /**
  * Every CPU is identified by integer. Let us describe the purpose of channels from
@@ -59,6 +61,11 @@ typedef cache_t {
     bit content[CACHE_SIZE];
     mtype cache_states[CACHE_SIZE];
     int tag[CACHE_SIZE]; // Tag is equal to memory address
+}
+
+typedef intention_t {
+    mtype type;
+    int memaddr;
 }
 
 bit memory[MEMORY_SIZE] = 0;
@@ -308,7 +315,7 @@ end:
  * Respond to all requests of all other CPUs. More specifically, polls request channel
  * and if there are some requests, respond to them.
  */
-inline respond(mypid) {
+inline respond(mypid, intention) {
     int recved_mem_addr;
     byte sender_pid;
 
@@ -322,6 +329,21 @@ inline respond(mypid) {
             printf("%d: Got msg={BusRd,%d} from %d, my_old_cache_state=%e\n",
                 mypid, recved_mem_addr, mypid, my_old_cache_state);
             if
+                // Some other CPU sent BusRd(addr) and we want to read addr.
+                :: intention.type == Read && intention.memaddr == recved_mem_addr &&
+                    my_old_cache_state != Modified ->
+                {
+                    // Other CPU want to read the same memory address.
+                    change_state(mypid, recved_mem_addr, Shared);
+                }
+                // Some other CPU sent BusRd(addr), we want to read addr, and we have addr
+                // as Modified. We need to flush addr first.
+                :: intention.type == Read && intention.memaddr == recved_mem_addr &&
+                    my_old_cache_state == Modified ->
+                {
+                    flush_and_invalidate(mypid, recved_mem_addr);
+                    change_state(mypid, recved_mem_addr, Shared);
+                }
                 :: my_old_cache_state == Modified -> {
                     // [1.2] M|BusRd
                     flush_and_invalidate(mypid, recved_mem_addr);
@@ -387,6 +409,9 @@ inline respond(mypid) {
 
 inline read(mypid, mem_addr) {
     printf("%d: Reading mem_addr %d\n", mypid, mem_addr);
+    intention_t intention;
+    intention.type = Read;
+    intention.memaddr = mem_addr;
 
     mtype curr_state = GET_CACHE_STATE(mypid, mem_addr);
     if
@@ -429,6 +454,9 @@ inline read(mypid, mem_addr) {
 
 inline write(mypid, mem_address, value) {
     printf("%d: Writing %d to mem_address %d\n", mypid, value, mem_address);
+    intention_t intention;
+    intention.type = Write;
+    intention.memaddr = mem_addr;
 
     if
         :: CACHE_TAG(mypid, mem_address) != mem_address &&
@@ -438,6 +466,7 @@ inline write(mypid, mem_address, value) {
             // we need to flush it first.
             flush_and_invalidate(mypid, mem_address);
         }
+        :: else -> skip;
     fi
 
     mtype curr_state = GET_CACHE_STATE(mypid, mem_address);
