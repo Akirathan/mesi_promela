@@ -4,7 +4,7 @@
  *
  * STATES:
  * - (M)odified: Contents different from main-memory, exclusive to this cache.
- * - (E)xclusive: Contents same with main-memory, exclusive to this cachee.
+ * - (E)xclusive: Contents same with main-memory, exclusive to this cache.
  * - (S)hared
  * - (I)invalid
  *
@@ -45,7 +45,7 @@ mtype = {BusRd, BusRdX, BusUpgr};
 chan req_channel[CPU_COUNT] = [CPU_COUNT] of {
     mtype, // Type of request
     int,   // memory address
-    byte   // from (cpu_idx)
+    byte   // sender_idx
 };
 chan resp_channel[CPU_COUNT] = [CPU_COUNT] of {mtype, int};
 
@@ -262,6 +262,7 @@ inline receive_acks(mypid) {
     int __i;
     for (__i : 0 .. CPU_COUNT - 2) {
         resp_channel[mypid] ? Invalid, _;
+        printf("%d: Got Invalid (ack)\n", mypid);
     }
 }
 
@@ -277,10 +278,13 @@ inline change_state(mypid, mem_addr, new_state) {
     printf("%d: State %e --> %e, mem_addr=%d, cache_addr=%d\n",
         mypid, old_state, new_state, mem_addr, CACHE_ADDR(mem_addr));
 
-    assert (old_state == Modified && (new_state == Shared || new_state == Invalid)) ||
+    assert CACHE_TAG(mypid, mem_addr) == mem_addr ->
+           (
+               (old_state == Modified && (new_state == Shared || new_state == Invalid)) ||
            (old_state == Exclusive && (new_state == Modified || new_state == Shared || new_state == Invalid)) ||
            (old_state == Shared && (new_state == Modified || new_state == Invalid)) ||
            (old_state == Invalid && (new_state == Modified || new_state == Exclusive || new_state == Shared))
+           )
 
     if
         :: new_state == Modified -> 
