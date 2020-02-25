@@ -51,12 +51,6 @@ chan req_channel[CPU_COUNT] = [CPU_COUNT] of {
 };
 chan resp_channel[CPU_COUNT] = [CPU_COUNT] of {mtype, int};
 
-// For signalling that a certain CPU ended its execution normally.
-chan end_channel = [CPU_COUNT] of {bool};
-
-#define ARE_ALL_CPUS_FINISHED \
-    full(end_channel)
-
 typedef cache_t {
     bit content[CACHE_SIZE];
     mtype cache_states[CACHE_SIZE];
@@ -86,7 +80,7 @@ bool cancels[CPU_COUNT] = false;
 
 // This "getter" and "setter" for cache state is preferable over CACHE_STATE, because it
 // also checks whether the tag of the cache entry corresponds.
-#define GET_CACHE_STATE(cpu_idx, memaddr)                    \
+#define GET_CACHE_STATE(cpu_idx, memaddr)       \
     (CACHE_TAG(cpu_idx, memaddr) == memaddr ->  \
         CACHE_STATE(cpu_idx, memaddr) :         \
         Invalid)
@@ -537,9 +531,6 @@ proctype cpu(int mypid) {
         print_state(mypid);
         print_memory();
     }
-
-    // Signal end of execution
-    end_channel ! true;
 }
 
 inline init_caches() {
@@ -572,11 +563,6 @@ init {
             run cpu(cpu_idx);
         }
     }
-
-    // Wait for all CPUs to end their execution.
-    ARE_ALL_CPUS_FINISHED;
-    printf("Init: all CPUs finished execution.\n");
-    print_memory();
 }
 
 
