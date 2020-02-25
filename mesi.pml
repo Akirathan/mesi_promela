@@ -212,36 +212,6 @@ ltl ltl_one_exclusive {
 }
 #endif // LTL_FORMULAS
 
-/**
- * A procedure called at the end of the simulation.
- */
-inline flush_all() {
-    printf("Flushing all\n");
-    // TODO: Are the responds here necessary?
-    int _cpu_idx;
-    for (_cpu_idx : 0 .. CPU_COUNT - 1) {
-        respond(_cpu_idx);
-    }
-
-    int cache_addr;
-    for (_cpu_idx : 0 .. CPU_COUNT - 1) {
-        for (cache_addr : 0 .. CACHE_SIZE - 1) {
-            if 
-                :: CACHE_STATE(_cpu_idx, cache_addr) == Modified -> {
-                    printf("Flushing cpu_idx=%d, cache_addr=%d, mem_addr=%d, value=%d\n",
-                        _cpu_idx, cache_addr,
-                        CACHE_TAG(_cpu_idx, cache_addr),    // mem_addr
-                        CACHE_CONTENT(_cpu_idx, cache_addr) // value
-                    );
-                    memory[CACHE_TAG(_cpu_idx, cache_addr)] = 
-                            CACHE_CONTENT(_cpu_idx, cache_addr);
-                }
-                :: else -> skip;
-            fi
-        }
-    }
-}
-
 
 /**
  * Send a request to all CPUs except self. More precisely, send a request_t to every
@@ -613,7 +583,6 @@ init {
     // Wait for all CPUs to end their execution.
     ARE_ALL_CPUS_FINISHED;
     printf("Init: all CPUs finished execution.\n");
-    flush_all();
     print_memory();
 }
 
