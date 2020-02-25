@@ -467,8 +467,13 @@ inline read(mypid, mem_addr) {
             CACHE_CONTENT(mypid, mem_addr) = memory[mem_addr];
             CACHE_TAG(mypid, mem_addr) = mem_addr;
     }
-        // Modified state is resolved in respond.
-        :: curr_state == Modified -> ASSERT_NOT_REACHABLE;
+        :: curr_state == Modified -> {
+            flush_and_invalidate(mypid, mem_addr);
+
+            change_state(mypid, mem_addr, next_state);
+            CACHE_CONTENT(mypid, mem_addr) = memory[mem_addr]
+            CACHE_TAG(mypid, mem_addr) = mem_addr;
+        }
     fi
 
 read_end:
@@ -496,20 +501,21 @@ inline write(mypid, mem_address, value) {
         :: else -> skip;
     fi
 
-    mtype curr_state = GET_CACHE_STATE(mypid, mem_address);
+    mtype cache_state = GET_CACHE_STATE(mypid, mem_address);
     if
-        :: curr_state == Invalid -> skip;
-        :: curr_state == Modified -> {
-            assert CACHE_TAG(mypid, mem_address) == mem_address;
+        :: cache_state == Modified -> {
+            CACHE_CONTENT(mypid, mem_address) = value;
         }
-        :: curr_state == Shared || curr_state == Exclusive -> {
-            assert CACHE_TAG(mypid, mem_address) == mem_address;
-            assert CACHE_CONTENT(mypid, mem_address) = memory[mem_address];
+        :: cache_state == Exclusive || cache_state == Shared -> {
+            CACHE_CONTENT(mypid, mem_address) = value;
+            change_state(mypid, mem_address, Modified);
+        }
+        :: cache_state == Invalid -> {
+            CACHE_TAG(mypid, mem_address) = mem_address;
+            CACHE_CONTENT(mypid, mem_address) = value;
+            change_state(mypid, mem_address, Modified);
     }
     fi
-            change_state(mypid, mem_address, Modified);
-            CACHE_CONTENT(mypid, mem_address) = value;
-            CACHE_TAG(mypid, mem_address) = mem_address;
 
 write_end:
     skip;
