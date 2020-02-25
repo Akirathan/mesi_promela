@@ -269,18 +269,22 @@ inline respond(mypid, intention) {
                     if
                         :: my_old_cache_state == Modified -> {
                             flush_and_invalidate(mypid, recved_mem_addr);
+                            d_step {
                             CACHE_TAG(mypid, recved_mem_addr) = recved_mem_addr;
                             CACHE_CONTENT(mypid, recved_mem_addr) = memory[recved_mem_addr];
                             change_state(mypid, recved_mem_addr, Shared);
+                        }
                         }
                         :: my_old_cache_state == Exclusive -> {
                             change_state(mypid, recved_mem_addr, Shared);
                         }
                         :: my_old_cache_state == Shared -> skip;
                         :: my_old_cache_state == Invalid -> {
+                            d_step{
                             CACHE_TAG(mypid, recved_mem_addr) = recved_mem_addr;
                             CACHE_CONTENT(mypid, recved_mem_addr) = memory[recved_mem_addr];
                             change_state(mypid, recved_mem_addr, Shared);
+                        }
                         }
                     fi
                     assert GET_CACHE_STATE(mypid, recved_mem_addr) == Shared;
@@ -399,16 +403,20 @@ inline read(mypid, mem_addr) {
             CACHE_CONTENT(mypid, mem_addr) = memory[mem_addr];
         }
         :: curr_state == Invalid -> {
+            d_step {
             change_state(mypid, mem_addr, next_state);
             CACHE_CONTENT(mypid, mem_addr) = memory[mem_addr];
             CACHE_TAG(mypid, mem_addr) = mem_addr;
         }
+        }
         :: curr_state == Modified -> {
             flush_and_invalidate(mypid, mem_addr);
 
+            d_step {
             change_state(mypid, mem_addr, next_state);
             CACHE_CONTENT(mypid, mem_addr) = memory[mem_addr]
             CACHE_TAG(mypid, mem_addr) = mem_addr;
+        }
         }
     fi
 
@@ -447,8 +455,10 @@ inline write(mypid, mem_address, value) {
             change_state(mypid, mem_address, Modified);
         }
         :: cache_state == Invalid -> {
+            d_step {
             CACHE_TAG(mypid, mem_address) = mem_address;
             CACHE_CONTENT(mypid, mem_address) = value;
+            }
             change_state(mypid, mem_address, Modified);
         }
     fi
