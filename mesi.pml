@@ -424,6 +424,7 @@ respond_end:
 
 inline read(mypid, mem_addr) {
     printf("%d: Reading mem_addr %d\n", mypid, mem_addr);
+    assert_correct_cache_state(mypid, mem_addr);
     intention_t intention;
     intention.type = Read;
     intention.memaddr = mem_addr;
@@ -476,6 +477,7 @@ read_end:
 
 inline write(mypid, mem_address, value) {
     printf("%d: Writing %d to mem_address %d\n", mypid, value, mem_address);
+    assert_correct_cache_state(mypid, mem_address);
     intention_t intention;
     intention.type = Write;
     intention.memaddr = mem_addr;
