@@ -335,14 +335,17 @@ inline respond(mypid, intention) {
                     change_state(mypid, recved_mem_addr, Shared);
                 }
                 :: my_old_cache_state == Modified -> {
-                    // [1.2] M|BusRd
                     flush_and_invalidate(mypid, recved_mem_addr);
                 }
                 :: my_old_cache_state == Exclusive -> {
-                    // [1.2] E|BusRd
+                    assert CACHE_CONTENT(mypid, recved_mem_addr) == memory[recved_mem_addr];
+                    assert CACHE_TAG(mypid, recved_mem_addr) == recved_mem_addr;
                     change_state(mypid, recved_mem_addr, Shared);
                 }
-                :: my_old_cache_state == Shared -> skip;
+                :: my_old_cache_state == Shared -> {
+                    assert CACHE_CONTENT(mypid, recved_mem_addr) == memory[recved_mem_addr];
+                    assert CACHE_TAG(mypid, recved_mem_addr) == recved_mem_addr;
+                }
                 :: my_old_cache_state == Invalid -> skip;
             fi
 
@@ -455,15 +458,14 @@ inline read(mypid, mem_addr) {
     mtype curr_state = GET_CACHE_STATE(mypid, mem_addr);
     if
     :: curr_state == Exclusive || curr_state == Shared -> {
-        // Reading cache line in mem_addr should be a cache hit.
-        assert CACHE_CONTENT(mypid, mem_addr) == memory[mem_addr];
-        assert CACHE_TAG(mypid, mem_addr) == mem_addr;
+            skip;
     }
         :: curr_state == Invalid -> {
             change_state(mypid, mem_addr, next_state);
             CACHE_CONTENT(mypid, mem_addr) = memory[mem_addr];
             CACHE_TAG(mypid, mem_addr) = mem_addr;
     }
+        // Modified state is resolved in respond.
         :: curr_state == Modified -> ASSERT_NOT_REACHABLE;
     fi
 
