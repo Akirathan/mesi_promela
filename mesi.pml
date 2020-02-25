@@ -353,7 +353,6 @@ inline respond(mypid, intention) {
             mtype my_old_cache_state = GET_CACHE_STATE(mypid, recved_mem_addr);
             printf("%d: Got msg={BusRd,%d} from %d, my_old_cache_state=%e\n",
                 mypid, recved_mem_addr, mypid, my_old_cache_state);
-            assert_correct_cache_state(mypid, recved_mem_addr);
 
             if
                 /*** This CPU and other CPU want to read the same memory ***/
@@ -395,6 +394,7 @@ inline respond(mypid, intention) {
             // that our cacheline will endup either as Invalid, or as Shared.
             assert GET_CACHE_STATE(mypid, recved_mem_addr) == Invalid ||
                    GET_CACHE_STATE(mypid, recved_mem_addr) == Shared
+            assert_correct_cache_state(mypid, recved_mem_addr);
 
             mtype my_new_cache_state = GET_CACHE_STATE(mypid, recved_mem_addr);
             printf("%d: Sending msg={%e,%d} to %d\n", mypid, my_new_cache_state, recved_mem_addr, sender_pid);
@@ -405,7 +405,6 @@ inline respond(mypid, intention) {
         :: req_channel[mypid] ? [BusRdX, recved_mem_addr, sender_pid] -> {
             req_channel[mypid] ? BusRdX, recved_mem_addr, sender_pid;
             printf("%d: Got msg={BusRdX,%d} from %d\n", mypid, recved_mem_addr, sender_pid)
-            assert_correct_cache_state(mypid, recved_mem_addr);
             if
                 :: intention.type == Write && intention.memaddr == recved_mem_addr -> {
                     // This CPU and some other CPU want to write to the same memory => clash.
@@ -435,6 +434,7 @@ inline respond(mypid, intention) {
                 }
             fi
             assert GET_CACHE_STATE(mypid, recved_mem_addr) == Invalid;
+            assert_correct_cache_state(mypid, recved_mem_addr);
 
             printf("%d: Sending msg={%e,%d} to %d\n", mypid, Invalid, recved_mem_addr, sender_pid);
             resp_channel[sender_pid] ! Invalid, recved_mem_addr;
