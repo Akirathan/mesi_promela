@@ -16,6 +16,7 @@
  * - BusRdX:  Other processor WRITES to cacheline that is NOT resident in it's cache.
  * - BusUpgr: Other processor WRITES to cacheline that IS resident in it's cache.
  *            This signal is sent only if the cacheline is Shared.
+              For simplicity, this signal is not used
  */
 
 #define CPU_COUNT 2
@@ -30,7 +31,7 @@
 // Cache state
 mtype = {Modified, Exclusive, Shared, Invalid};
 // Signals
-mtype = {BusRd, BusRdX, BusUpgr};
+mtype = {BusRd, BusRdX};
 // Intentions
 mtype = {Read, Write};
 
@@ -368,27 +369,6 @@ inline respond(mypid, intention) {
             mtype my_new_cache_state = CACHE_STATE(mypid, recved_mem_addr);
             printf("%d: Sending msg={%e,%d} to %d\n", mypid, my_new_cache_state, recved_mem_addr, sender_pid);
             resp_channel[sender_pid] ! my_new_cache_state, recved_mem_addr;
-        }
-
-        /**************  BusUpgr  ****************/
-        :: req_channel[mypid] ? [BusUpgr, recved_mem_addr, sender_pid] -> {
-            req_channel[mypid] ? BusUpgr, recved_mem_addr, sender_pid;
-            printf("%d: Got msg={BusUpgr,%d} from %d\n", mypid, recved_mem_addr, sender_pid);
-            assert_correct_cache_state(mypid, recved_mem_addr);
-            mtype my_state = GET_CACHE_STATE(mypid, recved_mem_addr);
-            assert my_state == Invalid || my_state == Shared;
-
-            if
-                :: intention.type == Write && intention.memaddr == recved_mem_addr -> {
-                    // Some other CPU has this cache line as Shared, and wants to write to it.
-                    // Note that it does not matter whater we have that cache line as Shared or as Invalid.
-                    cancel_operation(mypid, sender_pid, recved_mem_addr);
-                }
-                :: my_state == Shared -> change_state(mypid, recved_mem_addr, Invalid);
-                :: else -> skip;
-            fi
-            printf("%d: Sending msg={%e,%d} to %d\n", mypid, Invalid, recved_mem_addr, sender_pid);
-            resp_channel[sender_pid] ! Invalid, recved_mem_addr;
         }
 
         /**************  BusRdX  ****************/
