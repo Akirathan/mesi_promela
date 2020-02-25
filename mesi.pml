@@ -301,6 +301,20 @@ inline cancel_operation(mypid, sender_pid, memaddr) {
     goto respond_end;
 }
 
+inline assert_correct_cache_state(mypid, memaddr) {
+    mtype cache_state = GET_CACHE_STATE(mypid, memaddr);
+    if
+        :: cache_state == Modified -> {
+            assert CACHE_TAG(mypid, memaddr) == memaddr;
+        }
+        :: cache_state == Exclusive || cache_state == Shared -> {
+            assert CACHE_TAG(mypid, memaddr) == memaddr;
+            assert CACHE_CONTENT(mypid, memaddr) == memaddr;
+        }
+        :: cache_state == Invalid -> skip;
+    fi
+}
+
 /**
  * Respond to all requests of all other CPUs. More specifically, polls request channel
  * and if there are some requests, respond to them.
@@ -318,6 +332,8 @@ inline respond(mypid, intention) {
             mtype my_old_cache_state = GET_CACHE_STATE(mypid, recved_mem_addr);
             printf("%d: Got msg={BusRd,%d} from %d, my_old_cache_state=%e\n",
                 mypid, recved_mem_addr, mypid, my_old_cache_state);
+            assert_correct_cache_state(mypid, recved_mem_addr);
+
             if
                 // Some other CPU sent BusRd(addr) and we want to read addr.
                 :: intention.type == Read && intention.memaddr == recved_mem_addr &&
@@ -358,6 +374,7 @@ inline respond(mypid, intention) {
         :: req_channel[mypid] ? [BusUpgr, recved_mem_addr, sender_pid] -> {
             req_channel[mypid] ? BusUpgr, recved_mem_addr, sender_pid;
             printf("%d: Got msg={BusUpgr,%d} from %d\n", mypid, recved_mem_addr, sender_pid);
+            assert_correct_cache_state(mypid, recved_mem_addr);
             mtype my_state = GET_CACHE_STATE(mypid, recved_mem_addr);
             assert my_state == Invalid || my_state == Shared;
 
@@ -378,6 +395,7 @@ inline respond(mypid, intention) {
         :: req_channel[mypid] ? [BusRdX, recved_mem_addr, sender_pid] -> {
             req_channel[mypid] ? BusRdX, recved_mem_addr, sender_pid;
             printf("%d: Got msg={BusRdX,%d} from %d\n", mypid, recved_mem_addr, sender_pid)
+            assert_correct_cache_state(mypid, recved_mem_addr);
             if
                 :: intention.type == Write && intention.memaddr == recved_mem_addr -> {
                     // This CPU and some other CPU want to write to the same memory => clash.
