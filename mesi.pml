@@ -135,28 +135,6 @@ ltl both_not_modified {
         )
     )
 }
-
-/**
- * If there is a Modified cache entry, it should be written to memory in the future.
- *
- * _8_1_mem_addr is an address of memory that we want to modify (defined in proctype CPU,
- * and passed to write).
- */
-ltl ltl_write_not_lost {
-    [](cpu[0]@modified -> <> (cpu[0]@flush && cpu[0]:_8_1_mem_addr == cpu[0]:_8_1_1_recved_mem_addr))
-}
-
-/**
- * If there is an Exclusive cache entry with a specific tag, there should not exist
- * Exclusive cache entry in any other CPU cache with such a tag.
- */
-ltl ltl_one_exclusive {
-    // If CPU 0 marks 0-th cache entry (with tag 0) as Exclusive,
-    // then CPU 1 should not have 0-th cache entry markes as Exclusive.
-    [] (cpu[0]@exclusive && cpu[0]:_8_1_mem_addr == 0 -> (
-        CACHE_STATE(1, 0) != Exclusive
-    ))
-}
 #endif // LTL_FORMULAS
 
 
