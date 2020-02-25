@@ -70,6 +70,7 @@ typedef intention_t {
 
 bit memory[MEMORY_SIZE] = 0;
 cache_t caches[CPU_COUNT];
+bool cancels[CPU_COUNT] = false;
 
 #define CACHE_ADDR(mem_addr) \
     mem_addr % CACHE_SIZE
@@ -313,6 +314,23 @@ end:
     skip;
 }
 
+inline cancel_operation(mypid, sender_pid, memaddr) {
+    printf("%d: Cancelling operation.\n", mypid);
+    // Invalidate cacheline.
+    if
+        :: GET_CACHE_STATE(mypid, memaddr) == Modified -> {
+            flush_and_invalidate(mypid, memaddr);
+        }
+        :: else -> {
+            change_state(mypid, memaddr, Invalid);
+        }
+    fi
+    printf("%d: Sending msg={%e,%d} to %d\n", mypid, Invalid, memaddr, sender_pid);
+    resp_channel[sender_pid] ! Invalid, memaddr;
+    cancels[mypid] = true;
+    goto respond_end;
+}
+
 /**
  * Respond to all requests of all other CPUs. More specifically, polls request channel
  * and if there are some requests, respond to them.
@@ -358,7 +376,7 @@ inline respond(mypid, intention) {
                 :: my_old_cache_state == Invalid -> skip;
             fi
 
-            mtype my_new_cache_state = GET_CACHE_STATE(mypid, recved_mem_addr);
+            mtype my_new_cache_state = CACHE_STATE(mypid, recved_mem_addr);
             printf("%d: Sending msg={%e,%d} to %d\n", mypid, my_new_cache_state, recved_mem_addr, sender_pid);
             resp_channel[sender_pid] ! my_new_cache_state, recved_mem_addr;
         }
@@ -369,8 +387,14 @@ inline respond(mypid, intention) {
             printf("%d: Got msg={BusUpgr,%d} from %d\n", mypid, recved_mem_addr, sender_pid);
             mtype my_state = GET_CACHE_STATE(mypid, recved_mem_addr);
             assert my_state == Invalid || my_state == Shared;
+
             if
-                :: my_state != Invalid -> change_state(mypid, recved_mem_addr, Invalid);
+                :: intention.type == Write && intention.memaddr == recved_mem_addr -> {
+                    // Some other CPU has this cache line as Shared, and wants to write to it.
+                    // Note that it does not matter whater we have that cache line as Shared or as Invalid.
+                    cancel_operation(mypid, sender_pid, recved_mem_addr);
+                }
+                :: my_state == Shared -> change_state(mypid, recved_mem_addr, Invalid);
                 :: else -> skip;
             fi
             printf("%d: Sending msg={%e,%d} to %d\n", mypid, Invalid, recved_mem_addr, sender_pid);
@@ -381,8 +405,18 @@ inline respond(mypid, intention) {
         :: req_channel[mypid] ? [BusRdX, recved_mem_addr, sender_pid] -> {
             req_channel[mypid] ? BusRdX, recved_mem_addr, sender_pid;
             printf("%d: Got msg={BusRdX,%d} from %d\n", mypid, recved_mem_addr, sender_pid)
-            // TODO: There is no need to respond to this -> finaly our state will
-            // be invalid
+            if
+                :: intention.type == Write && intention.memaddr == recved_mem_addr -> {
+                    // This CPU and some other CPU want to write to the same memory => clash.
+                    cancel_operation(mypid, sender_pid, recved_mem_addr);
+                }
+                :: intention.type == Read && intention.memaddr == recved_mem_addr -> {
+                    // Some other CPU wants to write to a cache line, and we want to read it => clash.
+                    cancel_operation(mypid, sender_pid, recved_mem_addr);
+                }
+                :: else -> skip;
+            fi
+
             mtype state = GET_CACHE_STATE(mypid, recved_mem_addr);
             if
                 :: state == Invalid -> skip;
@@ -402,10 +436,8 @@ inline respond(mypid, intention) {
             printf("%d: Sending msg={%e,%d} to %d\n", mypid, Invalid, recved_mem_addr, sender_pid);
             resp_channel[sender_pid] ! Invalid, recved_mem_addr;
         }
-
-        // We do not want to block here if there are no requests for current CPU.
-        :: else -> skip;
     fi
+respond_end:
     printf("%d: Done responding to all.\n", mypid);
 }
 
@@ -415,43 +447,58 @@ inline read(mypid, mem_addr) {
     intention.type = Read;
     intention.memaddr = mem_addr;
 
-    mtype curr_state = GET_CACHE_STATE(mypid, mem_addr);
-    if
-    :: curr_state == Invalid -> {
-        // [1.1] I|PrRd
         atomic {
-            respond(mypid);
             signal_all(mypid, BusRd, mem_addr);
+        respond(mypid, intention);
         }
+
+    if
+        :: GET_CACHE_STATE(mypid, mem_addr) == Modified -> {
+            flush_and_invalidate(mypid, mem_addr);
+        }
+        :: else -> skip;
+    fi
+
         // Receive states from other CPUs.
         mtype next_state = Exclusive;
         int other_cpu_idx;
         for (other_cpu_idx : 0 .. CPU_COUNT - 2) {
             if
-                :: resp_channel[mypid] ? Invalid, mem_addr -> skip
-                :: resp_channel[mypid] ? Exclusive, mem_addr -> next_state = Shared;
+            :: resp_channel[mypid] ? Invalid, mem_addr -> next_state = Exclusive;
                 :: resp_channel[mypid] ? Shared, mem_addr -> next_state = Shared;
-                // TODO: This should not happen.
-                :: resp_channel[mypid] ? Modified, mem_addr -> next_state = Shared;
+            // This should not happen.
+            :: resp_channel[mypid] ? Exclusive, mem_addr -> ASSERT_NOT_REACHABLE;
+            :: resp_channel[mypid] ? Modified, mem_addr -> ASSERT_NOT_REACHABLE;
             fi
         }
         assert next_state == Exclusive || next_state == Shared;
-        change_state(mypid, mem_addr, next_state);
-        CACHE_CONTENT(mypid, mem_addr) = memory[mem_addr];
-        CACHE_TAG(mypid, mem_addr) = mem_addr;
+
+    if
+        :: cancels[mypid] -> {
+            // Operation was cancelled => do nothing.
+            cancels[mypid] = false;
+            goto read_end;
     }
+        :: else -> skip;
+    fi
+
+    mtype curr_state = GET_CACHE_STATE(mypid, mem_addr);
+    if
     :: curr_state == Exclusive || curr_state == Shared -> {
-        // [1.1] E|PrRd
         // Reading cache line in mem_addr should be a cache hit.
-        // TODO: Does this assert make sense?
         assert CACHE_CONTENT(mypid, mem_addr) == memory[mem_addr];
         assert CACHE_TAG(mypid, mem_addr) == mem_addr;
     }
-    :: curr_state == Modified -> {
-        assert CACHE_TAG(mypid, mem_addr) == mem_addr;
+        :: curr_state == Invalid -> {
+            change_state(mypid, mem_addr, next_state);
+            CACHE_CONTENT(mypid, mem_addr) = memory[mem_addr];
+            CACHE_TAG(mypid, mem_addr) = mem_addr;
     }
-    :: else -> ASSERT_NOT_REACHABLE;
+        :: curr_state == Modified -> ASSERT_NOT_REACHABLE;
     fi
+
+read_end:
+    skip;
 }
 
 inline write(mypid, mem_address, value) {
@@ -471,57 +518,37 @@ inline write(mypid, mem_address, value) {
         :: else -> skip;
     fi
 
-    mtype curr_state = GET_CACHE_STATE(mypid, mem_address);
-    if
-    :: curr_state == Invalid -> {
-        // [1.1] I|PrWr
         atomic {
-            respond(mypid);
             signal_all(mypid, BusRdX, mem_address);
+        respond(mypid, intention);
         }
         receive_acks(mypid);
+    if
+        :: cancels[mypid] -> {
+            // Operation was canceled => Do nothing.
+            cancels[mypid] = false;
+            goto write_end;
+        }
+        :: else -> skip;
+    fi
 
-        // TODO: Is this atomic necessary?
-        atomic {
-            CACHE_CONTENT(mypid, mem_address) = value;
-            CACHE_TAG(mypid, mem_address) = mem_address;
-            change_state(mypid, mem_address, Modified);
+    mtype curr_state = GET_CACHE_STATE(mypid, mem_address);
+    if
+        :: curr_state == Invalid -> skip;
+        :: curr_state == Modified -> {
+            assert CACHE_TAG(mypid, mem_address) == mem_address;
         }
-    }
-    :: curr_state == Exclusive -> {
-        // [1.1] E|PrWr
-        atomic {
-            change_state(mypid, mem_address, Modified);
-            CACHE_CONTENT(mypid, mem_address) = value;
-            CACHE_TAG(mypid, mem_address) = mem_address;
-        }
-    }
-    :: curr_state == Shared -> {
-        // [1.1] S|PrWr
-        respond(mypid);
-        if
-            // respond may have changed our cache state, so we have to check whether
-            // it was not changed. Note that this situation may happen when two
-            // CPUs have Shared cache-entries and they want to write to them, so
-            // both of them would send BusUpgr.
-            :: GET_CACHE_STATE(mypid, mem_address) == Shared -> {
-                signal_all(mypid, BusUpgr, mem_address);
-                receive_acks(mypid);
-                change_state(mypid, mem_address, Modified);
-                CACHE_CONTENT(mypid, mem_address) = value;
-                // Cache tag should already be set.
-                // TODO: Is this assert correct?
-                assert CACHE_TAG(mypid, mem_address) == mem_address;
-            }
-            // Some other CPU sent us BusUpgr signal and we have invalidated
-            // our cacheline, which means that we will not write to the cache
-            // at the moment.
-            :: else -> {
-                assert GET_CACHE_STATE(mypid, mem_address) == Invalid;
-            }
-        fi
+        :: curr_state == Shared || curr_state == Exclusive -> {
+            assert CACHE_TAG(mypid, mem_address) == mem_address;
+            assert CACHE_CONTENT(mypid, mem_address) = memory[mem_address];
     }
     fi
+            change_state(mypid, mem_address, Modified);
+            CACHE_CONTENT(mypid, mem_address) = value;
+            CACHE_TAG(mypid, mem_address) = mem_address;
+
+write_end:
+    skip;
 }
 
 /**
@@ -531,9 +558,6 @@ inline write(mypid, mem_address, value) {
 proctype cpu(int mypid) {
     int i;
     for (i : 0 .. STEP_NUM - 1) {
-        // Tohle by melo byt v ifu
-        respond(mypid);
-        // ...
         byte mem_addr;
         select(mem_addr : 0 .. MEMORY_SIZE - 1);
         if
@@ -547,8 +571,6 @@ proctype cpu(int mypid) {
         print_state(mypid);
         print_memory();
     }
-    // Respond at the end of all the operations - there may be some requests pending.
-    respond(mypid);
 
     // Signal end of execution
     end_channel ! true;
