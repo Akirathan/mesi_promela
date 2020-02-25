@@ -190,6 +190,22 @@ proctype monitor(int cpu_idx) {
 }
 
 #ifdef LTL_FORMULAS
+ltl both_not_exclusive {
+    (CACHE_STATE(0,0) == Exclusive && CACHE_TAG(0,0) == 0 ->
+        (CACHE_TAG(1,0) == 0 ->
+            CACHE_STATE(1,0) != Exclusive && CACHE_STATE(1,0) != Modified
+        )
+    )
+}
+
+ltl both_not_modified {
+    (CACHE_STATE(0,0) == Modified && CACHE_TAG(0,0) == 0 ->
+        (CACHE_TAG(1,0) == 0 ->
+            CACHE_STATE(1,0) != Modified && CACHE_STATE(1,0) != Exclusive
+        )
+    )
+}
+
 /**
  * If there is a Modified cache entry, it should be written to memory in the future.
  *
