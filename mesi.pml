@@ -336,37 +336,47 @@ inline respond(mypid, intention) {
             assert_correct_cache_state(mypid, recved_mem_addr);
 
             if
-                // Some other CPU sent BusRd(addr) and we want to read addr.
-                :: intention.type == Read && intention.memaddr == recved_mem_addr &&
-                    my_old_cache_state != Modified ->
-                {
-                    // Other CPU want to read the same memory address.
+                /*** This CPU and other CPU want to read the same memory ***/
+                :: intention.type == Read && intention.memaddr == recved_mem_addr -> {
+                    if
+                        :: my_old_cache_state == Modified -> {
+                            flush_and_invalidate(mypid, recved_mem_addr);
+                            CACHE_TAG(mypid, recved_mem_addr) = recved_mem_addr;
+                            CACHE_CONTENT(mypid, recved_mem_addr) = memory[recved_mem_addr];
                     change_state(mypid, recved_mem_addr, Shared);
                 }
-                // Some other CPU sent BusRd(addr), we want to read addr, and we have addr
-                // as Modified. We need to flush addr first.
-                :: intention.type == Read && intention.memaddr == recved_mem_addr &&
-                    my_old_cache_state == Modified ->
-                {
-                    flush_and_invalidate(mypid, recved_mem_addr);
+                        :: my_old_cache_state == Exclusive -> {
+                            change_state(mypid, recved_mem_addr, Shared);
+                        }
+                        :: my_old_cache_state == Shared -> skip;
+                        :: my_old_cache_state == Invalid -> {
+                            CACHE_TAG(mypid, recved_mem_addr) = recved_mem_addr;
+                            CACHE_CONTENT(mypid, recved_mem_addr) = memory[recved_mem_addr];
                     change_state(mypid, recved_mem_addr, Shared);
                 }
+                    fi
+                    assert GET_CACHE_STATE(mypid, recved_mem_addr) == Shared;
+                }
+                /*** This CPU and other CPU have different intentions ***/
+                :: else -> {
+                    if
                 :: my_old_cache_state == Modified -> {
                     flush_and_invalidate(mypid, recved_mem_addr);
                 }
                 :: my_old_cache_state == Exclusive -> {
-                    assert CACHE_CONTENT(mypid, recved_mem_addr) == memory[recved_mem_addr];
-                    assert CACHE_TAG(mypid, recved_mem_addr) == recved_mem_addr;
                     change_state(mypid, recved_mem_addr, Shared);
                 }
-                :: my_old_cache_state == Shared -> {
-                    assert CACHE_CONTENT(mypid, recved_mem_addr) == memory[recved_mem_addr];
-                    assert CACHE_TAG(mypid, recved_mem_addr) == recved_mem_addr;
-                }
+                        :: my_old_cache_state == Shared -> skip;
                 :: my_old_cache_state == Invalid -> skip;
             fi
+                }
+            fi
+            // Some other CPU want to read a cacheline, that is resident in our cache, which means
+            // that our cacheline will endup either as Invalid, or as Shared.
+            assert GET_CACHE_STATE(mypid, recved_mem_addr) == Invalid ||
+                   GET_CACHE_STATE(mypid, recved_mem_addr) == Shared
 
-            mtype my_new_cache_state = CACHE_STATE(mypid, recved_mem_addr);
+            mtype my_new_cache_state = GET_CACHE_STATE(mypid, recved_mem_addr);
             printf("%d: Sending msg={%e,%d} to %d\n", mypid, my_new_cache_state, recved_mem_addr, sender_pid);
             resp_channel[sender_pid] ! my_new_cache_state, recved_mem_addr;
         }
