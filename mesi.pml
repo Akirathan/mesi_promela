@@ -255,7 +255,7 @@ flush:    memory[memaddr] = CACHE_CONTENT(mypid, memaddr);
 inline change_state(mypid, mem_addr, new_state) {
     mtype old_state = GET_CACHE_STATE(mypid, mem_addr);
     if
-        :: old_state == new_state -> goto end;
+        :: old_state == new_state -> goto change_state_end;
         :: else -> skip;
     fi
 
@@ -281,7 +281,7 @@ exclusive:  skip;
     fi
 
     SET_CACHE_STATE(mypid, mem_addr, new_state);
-end:
+change_state_end:
     skip;
 }
 
