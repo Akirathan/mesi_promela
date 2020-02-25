@@ -285,9 +285,9 @@ inline change_state(mypid, mem_addr, new_state) {
     if 
         :: CACHE_TAG(mypid, mem_addr) == mem_addr -> {
            assert (old_state == Modified && (new_state == Shared || new_state == Invalid)) ||
-           (old_state == Exclusive && (new_state == Modified || new_state == Shared || new_state == Invalid)) ||
-           (old_state == Shared && (new_state == Modified || new_state == Invalid)) ||
-           (old_state == Invalid && (new_state == Modified || new_state == Exclusive || new_state == Shared))
+                  (old_state == Exclusive && (new_state == Modified || new_state == Shared || new_state == Invalid)) ||
+                  (old_state == Shared && (new_state == Modified || new_state == Invalid)) ||
+                  (old_state == Invalid && (new_state == Modified || new_state == Exclusive || new_state == Shared))
         }
         :: else -> skip;
     fi
@@ -362,8 +362,8 @@ inline respond(mypid, intention) {
                             flush_and_invalidate(mypid, recved_mem_addr);
                             CACHE_TAG(mypid, recved_mem_addr) = recved_mem_addr;
                             CACHE_CONTENT(mypid, recved_mem_addr) = memory[recved_mem_addr];
-                    change_state(mypid, recved_mem_addr, Shared);
-                }
+                            change_state(mypid, recved_mem_addr, Shared);
+                        }
                         :: my_old_cache_state == Exclusive -> {
                             change_state(mypid, recved_mem_addr, Shared);
                         }
@@ -371,23 +371,23 @@ inline respond(mypid, intention) {
                         :: my_old_cache_state == Invalid -> {
                             CACHE_TAG(mypid, recved_mem_addr) = recved_mem_addr;
                             CACHE_CONTENT(mypid, recved_mem_addr) = memory[recved_mem_addr];
-                    change_state(mypid, recved_mem_addr, Shared);
-                }
+                            change_state(mypid, recved_mem_addr, Shared);
+                        }
                     fi
                     assert GET_CACHE_STATE(mypid, recved_mem_addr) == Shared;
                 }
                 /*** This CPU and other CPU have different intentions ***/
                 :: else -> {
                     if
-                :: my_old_cache_state == Modified -> {
-                    flush_and_invalidate(mypid, recved_mem_addr);
-                }
-                :: my_old_cache_state == Exclusive -> {
-                    change_state(mypid, recved_mem_addr, Shared);
-                }
+                        :: my_old_cache_state == Modified -> {
+                            flush_and_invalidate(mypid, recved_mem_addr);
+                        }
+                        :: my_old_cache_state == Exclusive -> {
+                            change_state(mypid, recved_mem_addr, Shared);
+                        }
                         :: my_old_cache_state == Shared -> skip;
-                :: my_old_cache_state == Invalid -> skip;
-            fi
+                        :: my_old_cache_state == Invalid -> skip;
+                    fi
                 }
             fi
             // Some other CPU want to read a cacheline, that is resident in our cache, which means
@@ -451,44 +451,44 @@ inline read(mypid, mem_addr) {
     intention.type = Read;
     intention.memaddr = mem_addr;
 
-        atomic {
-            signal_all(mypid, BusRd, mem_addr);
+    atomic {
+        signal_all(mypid, BusRd, mem_addr);
         respond(mypid, intention);
-        }
+    }
 
-        // Receive states from other CPUs.
-        mtype next_state = Exclusive;
-        int other_cpu_idx;
-        for (other_cpu_idx : 0 .. CPU_COUNT - 2) {
-            if
+    // Receive states from other CPUs.
+    mtype next_state = Exclusive;
+    int other_cpu_idx;
+    for (other_cpu_idx : 0 .. CPU_COUNT - 2) {
+        if
             :: resp_channel[mypid] ? Invalid, mem_addr -> next_state = Exclusive;
-                :: resp_channel[mypid] ? Shared, mem_addr -> next_state = Shared;
+            :: resp_channel[mypid] ? Shared, mem_addr -> next_state = Shared;
             // This should not happen.
             :: resp_channel[mypid] ? Exclusive, mem_addr -> ASSERT_NOT_REACHABLE;
             :: resp_channel[mypid] ? Modified, mem_addr -> ASSERT_NOT_REACHABLE;
-            fi
-        }
-        assert next_state == Exclusive || next_state == Shared;
+        fi
+    }
+    assert next_state == Exclusive || next_state == Shared;
 
     if
         :: cancels[mypid] -> {
             // Operation was cancelled => do nothing.
             cancels[mypid] = false;
             goto read_end;
-    }
+        }
         :: else -> skip;
     fi
 
     mtype curr_state = GET_CACHE_STATE(mypid, mem_addr);
     if
-    :: curr_state == Exclusive || curr_state == Shared -> {
+        :: curr_state == Exclusive || curr_state == Shared -> {
             skip;
-    }
+        }
         :: curr_state == Invalid -> {
             change_state(mypid, mem_addr, next_state);
             CACHE_CONTENT(mypid, mem_addr) = memory[mem_addr];
             CACHE_TAG(mypid, mem_addr) = mem_addr;
-    }
+        }
         :: curr_state == Modified -> {
             flush_and_invalidate(mypid, mem_addr);
 
@@ -509,11 +509,11 @@ inline write(mypid, mem_address, value) {
     intention.type = Write;
     intention.memaddr = mem_addr;
 
-        atomic {
-            signal_all(mypid, BusRdX, mem_address);
+    atomic {
+        signal_all(mypid, BusRdX, mem_address);
         respond(mypid, intention);
-        }
-        receive_acks(mypid);
+    }
+    receive_acks(mypid);
     if
         :: cancels[mypid] -> {
             // Operation was canceled => Do nothing.
@@ -536,7 +536,7 @@ inline write(mypid, mem_address, value) {
             CACHE_TAG(mypid, mem_address) = mem_address;
             CACHE_CONTENT(mypid, mem_address) = value;
             change_state(mypid, mem_address, Modified);
-    }
+        }
     fi
 
 write_end:
@@ -559,18 +559,23 @@ proctype cpu(int mypid) {
             {
                 // We want to rewrite contents of this cache line, however it is Modified, therefore
                 // we need to flush it first.
-                flush_and_invalidate(mypid, mem_addr);
+                int cache_addr = mem_addr;
+                int tag = CACHE_TAG(mypid, cache_addr);
+                int value = CACHE_CONTENT(mypid, cache_addr);
+                change_state(mypid, tag, Invalid);
+                printf("%d: memory[%d] = %d\n", mypid, tag, value)
+                memory[tag] = value;
             }
             :: else -> skip;
         fi
 
         if
-        :: skip -> read(mypid, mem_addr);
-        :: skip -> {
-            bit value;
-            select(value : 0 .. 1);
-            write(mypid, mem_addr, value);
-        }
+            :: skip -> read(mypid, mem_addr);
+            :: skip -> {
+                bit value;
+                select(value : 0 .. 1);
+                write(mypid, mem_addr, value);
+            }
         fi
         print_state(mypid);
         print_memory();
