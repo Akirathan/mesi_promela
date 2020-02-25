@@ -246,9 +246,13 @@ inline receive_acks(mypid) {
 }
 
 inline flush_and_invalidate(mypid, memaddr) {
-    // TODO: Enclose in atomic?
-    printf("%d: memory[%d] = %d\n", mypid, memaddr, CACHE_CONTENT(mypid, memaddr));
-flush:    memory[memaddr] = CACHE_CONTENT(mypid, memaddr);
+    assert GET_CACHE_STATE(mypid, memaddr) == Modified;
+
+    int val = CACHE_CONTENT(mypid, memaddr);
+    int tag = CACHE_TAG(mypid, memaddr);
+    printf("%d: memory[%d] = %d\n", mypid, tag, val);
+flush:    
+    memory[tag] = val;
     change_state(mypid, memaddr, Invalid);
 }
 
