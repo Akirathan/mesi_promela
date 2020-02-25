@@ -25,8 +25,7 @@
 // Number of one CPU's writes and reads.
 #define STEP_NUM 2
 #define ASSERT_NOT_REACHABLE assert(false)
-//#define RUN_WITH_MONITORS
-//#define LTL_FORMULAS
+#define LTL_FORMULAS
 
 // Cache state
 mtype = {Modified, Exclusive, Shared, Invalid};
@@ -119,75 +118,6 @@ inline print_memory() {
     }
 }
 
-inline check_for_two_modified_cachelines() {
-    int cpu_idx;
-    for (cpu_idx : 0 .. CPU_COUNT - 1) {
-        int cache_addr;
-        for (cache_addr : 0 .. CACHE_SIZE - 1) {
-            if
-                :: GET_CACHE_STATE(cpu_idx, cache_addr) == Modified -> {
-                    // Check if other cpu has modified state
-                    int tag = CACHE_TAG(cpu_idx, cache_addr);
-                    assert tag != -1;
-                    // TODO: Make more efficient.
-                    atomic {
-                        // We should not find any other cpu that has a Modified cache line
-                        // with same tag.
-                        int other_cpu_idx;
-                        for (other_cpu_idx : (cpu_idx + 1) .. (CPU_COUNT - 1)) {
-                            int other_cache_addr;
-                            for (other_cache_addr : 0 .. CACHE_SIZE - 1) {
-                                if
-                                    :: GET_CACHE_STATE(other_cpu_idx, other_cache_addr) == Modified &&
-                                    CACHE_TAG(other_cpu_idx, other_cache_addr) == tag -> 
-two_modified:                       {
-                                        printf("Monitor: At two_modified, printing state:\n");
-                                        print_state(cpu_idx);
-                                        print_state(other_cpu_idx);
-                                        print_memory();
-                                    }
-                                    :: else -> skip;
-                                fi
-                            }
-                        }
-                    }
-                }
-                :: else -> skip;
-            fi
-        }
-    }
-}
-
-/**
- * If there is a Modified cache entry, it should be written to memory in the future.
- */
-inline write_not_lost(cpu_idx) {
-    int cache_addr;
-    for (cache_addr : 0 .. CACHE_SIZE - 1) {
-        if
-            :: CACHE_STATE(cpu_idx, cache_addr) == Modified -> {
-                // In the future, the value should be written to memory.
-                bit value = CACHE_CONTENT(cpu_idx, cache_addr);
-                int mem_addr = CACHE_TAG(cpu_idx, cache_addr);
-                printf("Monitor(%d): waiting for value %d to be written to mem_addr=%d\n",
-                    cpu_idx, value, mem_addr);
-                // TODO: This statement should be executable before the end.
-                memory[mem_addr] == value;
-            }
-            :: else -> skip;
-        fi
-    }
-}
-
-proctype monitor(int cpu_idx) {
-#ifdef RUN_WITH_MONITORS
-    do
-        :: write_not_lost(cpu_idx);
-        :: ARE_ALL_CPUS_FINISHED -> break;
-    od
-#endif
-    skip;
-}
 
 #ifdef LTL_FORMULAS
 ltl both_not_exclusive {
@@ -618,9 +548,6 @@ init {
     int cpu_idx;
     atomic {
         for (cpu_idx : 0 .. CPU_COUNT - 1) {
-#ifdef RUN_WITH_MONITORS
-            run monitor(cpu_idx);
-#endif
             run cpu(cpu_idx);
         }
     }
