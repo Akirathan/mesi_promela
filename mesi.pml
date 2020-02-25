@@ -11,7 +11,9 @@
  *
  * SIGNALS:
  * - PrRd:    (issued by processor) Processor READS from it's cache.
+ *            For simplicity implemented with BusRd.
  * - PrWr:    (issued by processor) Processor WRITES to it's cache.
+ *            For simplicity implemented with BusRdX.
  * - BusRd:   Other processor READS cacheline that is NOT resident in it's cache.
  * - BusRdX:  Other processor WRITES to cacheline that is NOT resident in it's cache.
  * - BusUpgr: Other processor WRITES to cacheline that IS resident in it's cache.
@@ -23,7 +25,7 @@
 #define CACHE_SIZE 2
 #define MEMORY_SIZE 4
 // Number of one CPU's writes and reads.
-#define STEP_NUM 2
+#define STEP_NUM 3
 #define ASSERT_NOT_REACHABLE assert(false)
 #define LTL_FORMULAS
 
@@ -34,22 +36,17 @@ mtype = {BusRd, BusRdX};
 // Intentions
 mtype = {Read, Write};
 
-/**
- * Every CPU is identified by integer. Let us describe the purpose of channels from
- * the perspective of one CPU identified by cpu_idx.
- *
- * In req_channel[cpu_idx] there are requests made by other CPUs. This CPU is
- * required to answer some of these requests via resp_channel[other_cpu_idx].
- *
- * Note that these requests do not require responses:
- *   TODO...
- */
+// See description of channels in README.
 chan req_channel[CPU_COUNT] = [CPU_COUNT] of {
     mtype, // Type of request
     int,   // memory address
     byte   // sender_idx
 };
-chan resp_channel[CPU_COUNT] = [CPU_COUNT] of {mtype, int};
+
+chan resp_channel[CPU_COUNT] = [CPU_COUNT] of {
+    mtype,  // Cache state
+    int     // memory address
+};
 
 typedef cache_t {
     bit content[CACHE_SIZE];
@@ -64,6 +61,7 @@ typedef intention_t {
 
 bit memory[MEMORY_SIZE] = 0;
 cache_t caches[CPU_COUNT];
+// If cancels[cpu_idx] == true, it means that a cpu_idx CPU wants to cancel current operation.
 bool cancels[CPU_COUNT] = false;
 
 #define CACHE_ADDR(mem_addr) \
@@ -170,7 +168,6 @@ ltl both_not_modified {
  * req_channel[i] for every i such that i != self_cpu_idx.
  */
 inline signal_all(mypid, msgtype, mem_addr) {
-    atomic {
         printf("%d: Signalling all {%e,%d}\n", mypid, msgtype, mem_addr);
         int _i;
         for(_i : 0 .. CPU_COUNT - 1) {
@@ -182,7 +179,6 @@ inline signal_all(mypid, msgtype, mem_addr) {
                 }
             fi
         }
-    }
 }
 
 /**
@@ -202,7 +198,6 @@ inline flush_and_invalidate(mypid, memaddr) {
     int val = CACHE_CONTENT(mypid, memaddr);
     int tag = CACHE_TAG(mypid, memaddr);
     printf("%d: memory[%d] = %d\n", mypid, tag, val);
-flush:    
     memory[tag] = val;
     change_state(mypid, memaddr, Invalid);
 }
@@ -224,14 +219,6 @@ inline change_state(mypid, mem_addr, new_state) {
                   (old_state == Shared && (new_state == Modified || new_state == Invalid)) ||
                   (old_state == Invalid && (new_state == Modified || new_state == Exclusive || new_state == Shared))
         }
-        :: else -> skip;
-    fi
-
-    if
-        :: new_state == Modified -> 
-modified:   skip;
-        :: new_state == Exclusive ->
-exclusive:  skip;
         :: else -> skip;
     fi
 
@@ -272,8 +259,7 @@ inline assert_correct_cache_state(mypid, memaddr) {
 }
 
 /**
- * Respond to all requests of all other CPUs. More specifically, polls request channel
- * and if there are some requests, respond to them.
+ * Respond to all requests of all other CPUs.
  */
 inline respond(mypid, intention) {
     int recved_mem_addr;
@@ -284,7 +270,6 @@ inline respond(mypid, intention) {
         /**************  BusRd  ****************/
         :: req_channel[mypid] ? [BusRd, recved_mem_addr, sender_pid] -> {
             req_channel[mypid] ? BusRd, recved_mem_addr, sender_pid;
-            // TODO: We have to check whether tag corresponds to recved_mem_addr.
             mtype my_old_cache_state = GET_CACHE_STATE(mypid, recved_mem_addr);
             printf("%d: Got msg={BusRd,%d} from %d, my_old_cache_state=%e\n",
                 mypid, recved_mem_addr, mypid, my_old_cache_state);
