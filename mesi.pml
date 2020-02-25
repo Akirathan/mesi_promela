@@ -433,13 +433,6 @@ inline read(mypid, mem_addr) {
         respond(mypid, intention);
         }
 
-    if
-        :: GET_CACHE_STATE(mypid, mem_addr) == Modified -> {
-            flush_and_invalidate(mypid, mem_addr);
-        }
-        :: else -> skip;
-    fi
-
         // Receive states from other CPUs.
         mtype next_state = Exclusive;
         int other_cpu_idx;
