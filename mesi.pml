@@ -290,13 +290,15 @@ inline change_state(mypid, mem_addr, new_state) {
     printf("%d: State %e --> %e, mem_addr=%d, cache_addr=%d\n",
         mypid, old_state, new_state, mem_addr, CACHE_ADDR(mem_addr));
 
-    assert CACHE_TAG(mypid, mem_addr) == mem_addr ->
-           (
-               (old_state == Modified && (new_state == Shared || new_state == Invalid)) ||
+    if 
+        :: CACHE_TAG(mypid, mem_addr) == mem_addr -> {
+           assert (old_state == Modified && (new_state == Shared || new_state == Invalid)) ||
            (old_state == Exclusive && (new_state == Modified || new_state == Shared || new_state == Invalid)) ||
            (old_state == Shared && (new_state == Modified || new_state == Invalid)) ||
            (old_state == Invalid && (new_state == Modified || new_state == Exclusive || new_state == Shared))
-           )
+        }
+        :: else -> skip;
+    fi
 
     if
         :: new_state == Modified -> 
