@@ -310,7 +310,7 @@ inline assert_correct_cache_state(mypid, memaddr) {
         }
         :: cache_state == Exclusive || cache_state == Shared -> {
             assert CACHE_TAG(mypid, memaddr) == memaddr;
-            assert CACHE_CONTENT(mypid, memaddr) == memaddr;
+            assert CACHE_CONTENT(mypid, memaddr) == memory[memaddr];
         }
         :: cache_state == Invalid -> skip;
     fi
