@@ -146,11 +146,26 @@ ltl both_not_exclusive {
     )
 }
 
+/**
+ * Very similar to BOTH_NOT_EXCLUSIVE, except we check modified (see comment on BOTH_NOT_EXCLUSIVE).
+ */
+#define BOTH_NOT_MODIFIED(cpu_idx, other_cpu_idx, cache_addr, mem_addr) \
+    ( \
+        CACHE_STATE(cpu_idx, cache_addr) == Modified && \
+        CACHE_TAG(cpu_idx, cache_addr) == mem_addr -> \
+        ( \
+            CACHE_TAG(other_cpu_idx, cache_addr) == mem_addr -> \
+                CACHE_STATE(other_cpu_idx, cache_addr) != Modified && \
+                CACHE_STATE(other_cpu_idx, cache_addr) != Exclusive \
+        ) \
+    )
+
 ltl both_not_modified {
-    (CACHE_STATE(0,0) == Modified && CACHE_TAG(0,0) == 0 ->
-        (CACHE_TAG(1,0) == 0 ->
-            CACHE_STATE(1,0) != Modified && CACHE_STATE(1,0) != Exclusive
-        )
+    [] (
+        BOTH_NOT_MODIFIED(0, 1, 0, 0) &&
+        BOTH_NOT_MODIFIED(0, 1, 1, 1) &&
+        BOTH_NOT_MODIFIED(0, 1, 0, 2) &&
+        BOTH_NOT_MODIFIED(0, 1, 1, 3)
     )
 }
 #endif // LTL_FORMULAS
