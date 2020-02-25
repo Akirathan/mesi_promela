@@ -482,17 +482,6 @@ inline write(mypid, mem_address, value) {
     intention.type = Write;
     intention.memaddr = mem_addr;
 
-    if
-        :: CACHE_TAG(mypid, mem_address) != mem_address &&
-            GET_CACHE_STATE(mypid, mem_address) == Modified ->
-        {
-            // We want to rewrite contents of this cache line, however it is Modified, therefore
-            // we need to flush it first.
-            flush_and_invalidate(mypid, mem_address);
-        }
-        :: else -> skip;
-    fi
-
         atomic {
             signal_all(mypid, BusRdX, mem_address);
         respond(mypid, intention);
@@ -535,6 +524,18 @@ proctype cpu(int mypid) {
     for (i : 0 .. STEP_NUM - 1) {
         byte mem_addr;
         select(mem_addr : 0 .. MEMORY_SIZE - 1);
+
+        if
+            :: CACHE_TAG(mypid, mem_addr) != mem_addr &&
+                CACHE_STATE(mypid, mem_addr) == Modified ->
+            {
+                // We want to rewrite contents of this cache line, however it is Modified, therefore
+                // we need to flush it first.
+                flush_and_invalidate(mypid, mem_addr);
+            }
+            :: else -> skip;
+        fi
+
         if
         :: skip -> read(mypid, mem_addr);
         :: skip -> {
