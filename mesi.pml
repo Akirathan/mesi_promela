@@ -481,8 +481,14 @@ inline read(mypid, mem_addr) {
 
     mtype curr_state = GET_CACHE_STATE(mypid, mem_addr);
     if
-        :: curr_state == Exclusive || curr_state == Shared -> {
+        :: curr_state == Exclusive -> {
             skip;
+        }
+        :: curr_state == Shared -> {
+            // During respond, other CPU could flush their cache, moreover this cacheline's state
+            // could have been changed to Shared in respond, so we have to make sure that we
+            // have the most current memory.
+            CACHE_CONTENT(mypid, mem_addr) = memory[mem_addr];
         }
         :: curr_state == Invalid -> {
             change_state(mypid, mem_addr, next_state);
