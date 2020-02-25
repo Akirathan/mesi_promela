@@ -414,6 +414,8 @@ inline respond(mypid, intention) {
                     flush_and_invalidate(mypid, recved_mem_addr);
                 }
             fi
+            assert GET_CACHE_STATE(mypid, recved_mem_addr) == Invalid;
+
             printf("%d: Sending msg={%e,%d} to %d\n", mypid, Invalid, recved_mem_addr, sender_pid);
             resp_channel[sender_pid] ! Invalid, recved_mem_addr;
         }
